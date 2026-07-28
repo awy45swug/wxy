@@ -32,6 +32,19 @@ const ROASTS = [
   '😇 老板看了都感动'
 ];
 
+// 第一名摸鱼夸奖文案（与垫底吐槽一样每 2 秒轮播一次）
+const PRAISES = [
+  '🏆 摸鱼之王就是你，膜拜！',
+  '👑 榜首の从容，老板看了沉默',
+  '🌟 带薪摸鱼天花板，慕了',
+  '💪 这摸鱼时长，是被天赋眷顾',
+  '🐟 鱼生赢家，摸得优雅又持久',
+  '🔥 第一名实至名归，继续摸！'
+];
+
+// 吐槽 / 夸奖轮播索引：每 2 秒切一次
+let rotateIdx = 0;
+
 // 小红书每日爆款 Top30（后端实时拉取；拉不到时用这份精选榜兜底）
 const XHS_FALLBACK = [
   '打工人的工位减脂餐，一周不重样', '显眼包穿搭才是夏日顶流', '带薪摸鱼一小时续命一整天',
@@ -144,7 +157,11 @@ function enterLocalMode() {
   mode = 'local';
   serverState = { users: Object.values(localState.users) };
   toast('📱 本地模式：本机多人（同浏览器切换昵称出榜）');
-  if (myNick) { handleLocal({ type: 'join', id: myId, nickname: myNick, avatar: myAvatar }); hideModal(); }
+  if (myNick) {
+    handleLocal({ type: 'join', id: myId, nickname: myNick, avatar: myAvatar });
+    handleLocal({ type: 'start', id: myId }); // 本地模式也自动开始计时
+    hideModal();
+  }
   else showModal();
   render();
   renderChat();
@@ -166,8 +183,6 @@ function handleLocal(obj) {
     if (u.running && u.runStart) add += (now - u.runStart) / 1000;
     u.totalBase += add; u.todayBase += add; u.weekBase += add; u.monthBase += add;
     u.pending = 0; u.running = false; u.runStart = null;
-  } else if (obj.type === 'reset') {
-    localState.users = {};
   }
   saveLocal();
   serverState = { users: Object.values(localState.users) };
@@ -183,6 +198,7 @@ function send(obj) {
 }
 function sendJoin() {
   send({ type: 'join', id: myId, nickname: myNick, avatar: myAvatar });
+  send({ type: 'start', id: myId }); // 进入网页自动开始计时
 }
 
 /* ---------- 时间计算 ---------- */
@@ -315,14 +331,19 @@ function renderBoard(users) {
     else if (currentView === 'week') subStr = '月 ' + fmt(monthLive(u)) + ' · 总 ' + fmt(totalLive(u));
     else subStr = '总 ' + fmt(totalLive(u));
 
-    // 称号 / 吐槽
+    // 称号 / 夸奖 / 吐槽（第一名夸奖 + 垫底吐槽，每 2 秒轮播一次）
     let badge = `<span class="badge">${titleFor(mainVal)}</span>`;
-    if (rank === users.length && users.length > 1) {
-      const roast = ROASTS[Math.floor(Math.random() * ROASTS.length)];
+    if (rank === 1) {
+      const praise = PRAISES[rotateIdx % PRAISES.length];
+      badge += `<span class="badge praise">${praise}</span>`;
+    } else if (rank === users.length && users.length > 1) {
+      const roast = ROASTS[rotateIdx % ROASTS.length];
       badge = `<span class="badge roast">${roast}</span>`;
     }
     const liveBadge = u.running ? '<span class="badge live">🌊 摸鱼中</span>' : '';
     const caughtBadge = u.caught > 0 ? `<span class="badge caught">🚨被抓${u.caught}</span>` : '';
+    // 抓摸鱼：只有对方正在摸鱼中才能抓，否则按钮暗掉不可点
+    const canCatch = u.running && u.id !== myId;
 
     const mainStr = fmt(mainVal);
     // 数字变化触发 pop 动画
@@ -341,7 +362,7 @@ function renderBoard(users) {
         <div class="t-total${popCls}">${mainStr}</div>
         <div class="t-today">${subStr}</div>
       </div>
-      <button class="catch-btn" data-target="${u.id}" ${u.id === myId ? 'disabled' : ''} title="抓ta摸鱼">🤚</button>
+      <button class="catch-btn" data-target="${u.id}" ${canCatch ? '' : 'disabled'} title="${u.id === myId ? '不能抓自己' : (u.running ? '抓ta摸鱼！' : 'ta没在摸鱼，抓不了')}">🤚</button>
     `;
 
     // 排名变动 -> bump 动画
@@ -392,14 +413,6 @@ $('btnPause').onclick = () => { send({ type: 'pause', id: myId }); };
 $('btnStop').onclick = () => {
   send({ type: 'stop', id: myId });
   toast('🎣 本局摸鱼已入账，干得漂亮');
-};
-
-/* ---------- 重置 ---------- */
-$('btnReset').onclick = () => {
-  if (confirm('⚠️ 确定要清空所有人的摸鱼记录吗？\n此操作无法撤销，全员回到起点！')) {
-    send({ type: 'reset' });
-    toast('🧹 记录已清空，大家重新做人');
-  }
 };
 
 /* ---------- 切换用户（生成全新身份，旧身份记录留在榜上） ---------- */
@@ -516,6 +529,12 @@ setInterval(() => {
   tipIdx = (tipIdx + 1) % TIPS.length;
   $('tips').textContent = TIPS[tipIdx];
 }, 4000);
+
+/* ---------- 第一名夸奖 / 垫底吐槽 每 2 秒轮播 ---------- */
+setInterval(() => {
+  rotateIdx = (rotateIdx + 1) % Math.max(ROASTS.length, PRAISES.length);
+  render();
+}, 2000);
 
 /* ---------- 本地平滑滚动 + 本地模式跨期清零 ---------- */
 function clientWeekStr() {
@@ -683,7 +702,7 @@ function renderXhs() {
   if (!list) return;
   const items = (xhsItems && xhsItems.length) ? xhsItems : XHS_FALLBACK;
   list.innerHTML = items.slice(0, 30).map((it) => `
-    <a class="xhs-item" href="https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(it.title)}" target="_blank" rel="noopener">
+    <a class="xhs-item" href="https://www.xiaohongshu.com/search?keyword=${encodeURIComponent(it.title)}" target="_blank" rel="noopener">
       <span class="xhs-rank">${it.rank || ''}</span>
       <span class="xhs-title">${escapeHTML(it.title)}</span>
       ${it.hot ? `<span class="xhs-hot">🔥${escapeHTML(it.hot)}</span>` : ''}
