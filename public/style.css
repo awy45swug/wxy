@@ -304,6 +304,7 @@ body {
   color: #8a5fc0;
 }
 .badge.roast { background: #ffe6ef; color: #d8618f; }
+.badge.praise { background: linear-gradient(135deg, #fff3d1, #ffe6b8); color: #c98a2e; }
 .badge.live { background: #e1f7ef; color: #1fae84; }
 
 .times { text-align: right; flex-shrink: 0; }
@@ -431,7 +432,8 @@ body {
 }
 .catch-btn:hover { filter: brightness(1.05); }
 .catch-btn:active { transform: scale(0.9) rotate(-8deg); }
-.catch-btn:disabled { opacity: 0; cursor: default; pointer-events: none; }
+.catch-btn:not(:disabled) { box-shadow: 0 4px 12px rgba(216,88,59,0.35); }
+.catch-btn:disabled { opacity: 0.32; filter: grayscale(1); cursor: not-allowed; pointer-events: none; }
 
 .catch-fx {
   position: fixed;
@@ -456,17 +458,16 @@ body {
 .merit-mine b { font-size: 16px; }
 .woodfish-wrap { position: relative; display: grid; place-items: center; margin: 6px 0 4px; }
 .woodfish {
-  font-size: 72px;
-  line-height: 1;
+  width: 132px; height: 132px;
   border: none;
-  background: radial-gradient(circle at 50% 40%, #ffe6b8, #e9b96b);
-  border-radius: 50%;
-  width: 130px; height: 130px;
-  box-shadow: 0 10px 24px rgba(190,130,40,0.35), inset 0 -8px 14px rgba(150,90,20,0.3);
+  background: transparent;
+  padding: 0;
   cursor: pointer;
   transition: transform 0.08s ease;
   user-select: none;
+  filter: drop-shadow(0 10px 16px rgba(150,90,20,0.35));
 }
+.woodfish-svg { width: 100%; height: 100%; display: block; transform-origin: 60% 60%; }
 .woodfish:active { transform: scale(0.94); }
 .woodfish.knock { animation: wood-knock 0.18s ease; }
 @keyframes wood-knock {
@@ -653,6 +654,7 @@ body.dark .ava { background: linear-gradient(135deg, #4a2f4a, #2a3a5a); color: #
 body.dark .me-avatar { background: linear-gradient(135deg, #4a2f4a, #2a3a5a); color: #fff; }
 body.dark .badge { background: #3a2f55; color: #c4a6f0; }
 body.dark .badge.roast { background: #4a2a3a; color: #ff9ec4; }
+body.dark .badge.praise { background: #4a3a20; color: #ffc98a; }
 body.dark .badge.live { background: #1f4a3a; color: #5fe0b0; }
 body.dark .t-today { color: #b6a3d8; }
 body.dark .nick { color: var(--ink); }
@@ -680,6 +682,7 @@ body.dark .wall-tip { color: #b6a3d8; }
 body.dark .chat-card, body.dark .merit-card, body.dark .xhs-card { background: #241d3a; }
 body.dark .merit-mine { color: #ffc98a; }
 body.dark .merit-tip { color: #b6a3d8; }
+body.dark .woodfish { filter: drop-shadow(0 8px 14px rgba(0,0,0,0.5)); }
 body.dark .merit-row { background: #2a2240; border-color: #3a3050; }
 body.dark .merit-row.me { border-color: var(--pink); background: linear-gradient(135deg, #34284a, #2e2440); }
 body.dark .m-ava { background: linear-gradient(135deg, #4a2f4a, #2a3a5a); }
