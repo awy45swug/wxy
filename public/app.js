@@ -57,12 +57,15 @@ let mode = 'online';            // 'online' | 'local'
 let wsConnected = false;        // ws 是否已成功建立
 let serverState = { users: [] };
 
+/* ---------- 当前查看的榜单维度 ---------- */
+let currentView = 'total';     // 'total' | 'today' | 'week' | 'month'
+
 /* ---------- WebSocket ---------- */
 const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const ws = new WebSocket(`${wsProto}//${location.host}`);
 let clockOffset = 0; // serverNow - clientNow，用于校正时钟漂移
 let prevRank = {};
-let lastTotal = {}; // 记录上次展示的总时长，用于触发数字 pop 动画
+let lastTotal = {}; // 记录上次展示的时长，用于触发数字 pop 动画
 
 ws.onopen = () => {
   wsConnected = true;
@@ -101,7 +104,7 @@ function handleLocal(obj) {
   const id = obj.id || myId;
   const now = Date.now();
   if (obj.type === 'join') {
-    const u = localState.users[id] || { id, running: false, runStart: null, pending: 0, totalBase: 0, todayBase: 0 };
+    const u = localState.users[id] || { id, running: false, runStart: null, pending: 0, totalBase: 0, todayBase: 0, weekBase: 0, monthBase: 0 };
     u.nickname = obj.nickname; u.avatar = obj.avatar;
     localState.users[id] = u;
   } else if (obj.type === 'start') {
@@ -111,7 +114,7 @@ function handleLocal(obj) {
     const u = localState.users[id]; if (!u) return;
     let add = u.pending || 0;
     if (u.running && u.runStart) add += (now - u.runStart) / 1000;
-    u.totalBase += add; u.todayBase += add;
+    u.totalBase += add; u.todayBase += add; u.weekBase += add; u.monthBase += add;
     u.pending = 0; u.running = false; u.runStart = null;
   } else if (obj.type === 'reset') {
     localState.users = {};
@@ -142,6 +145,16 @@ function sessionLive(u) {
 }
 function totalLive(u) { return (u.totalBase || 0) + sessionLive(u); }
 function todayLive(u) { return (u.todayBase || 0) + sessionLive(u); }
+function weekLive(u) { return (u.weekBase || 0) + sessionLive(u); }
+function monthLive(u) { return (u.monthBase || 0) + sessionLive(u); }
+
+// 按当前查看维度取"实时累计值"
+function viewLive(u, view) {
+  if (view === 'today') return todayLive(u);
+  if (view === 'week') return weekLive(u);
+  if (view === 'month') return monthLive(u);
+  return totalLive(u);
+}
 
 function fmt(sec) {
   sec = Math.max(0, Math.floor(sec));
@@ -168,7 +181,7 @@ function avatarHTML(avatar) {
 const $ = (id) => document.getElementById(id);
 
 function render() {
-  const users = serverState.users.slice().sort((a, b) => totalLive(b) - totalLive(a));
+  const users = serverState.users.slice().sort((a, b) => viewLive(b, currentView) - viewLive(a, currentView));
   const me = users.find((u) => u.id === myId);
 
   renderTimer(me);
@@ -240,17 +253,26 @@ function renderBoard(users) {
       rankCell = `<span>${rank}</span>`;
     }
 
+    // 主显示值 = 当前查看维度
+    const mainVal = viewLive(u, currentView);
+    // 副行：给出参照（非总榜时显示总时长，总榜时显示今日）
+    let subStr;
+    if (currentView === 'total') subStr = '今日 ' + fmt(todayLive(u));
+    else if (currentView === 'today') subStr = '总 ' + fmt(totalLive(u));
+    else if (currentView === 'week') subStr = '月 ' + fmt(monthLive(u)) + ' · 总 ' + fmt(totalLive(u));
+    else subStr = '总 ' + fmt(totalLive(u));
+
     // 称号 / 吐槽
-    let badge = `<span class="badge">${titleFor(totalLive(u))}</span>`;
+    let badge = `<span class="badge">${titleFor(mainVal)}</span>`;
     if (rank === users.length && users.length > 1) {
       const roast = ROASTS[Math.floor(Math.random() * ROASTS.length)];
       badge = `<span class="badge roast">${roast}</span>`;
     }
     const liveBadge = u.running ? '<span class="badge live">🌊 摸鱼中</span>' : '';
 
-    const totalStr = fmt(totalLive(u));
+    const mainStr = fmt(mainVal);
     // 数字变化触发 pop 动画
-    const popped = lastTotal[u.id] !== undefined && Math.floor(lastTotal[u.id]) !== Math.floor(totalLive(u));
+    const popped = lastTotal[u.id] !== undefined && Math.floor(lastTotal[u.id]) !== Math.floor(mainVal);
     const popCls = popped ? ' pop' : '';
 
     row.innerHTML = `
@@ -262,8 +284,8 @@ function renderBoard(users) {
         ${badge}${liveBadge}
       </div>
       <div class="times">
-        <div class="t-total${popCls}">${totalStr}</div>
-        <div class="t-today">今日 ${fmt(todayLive(u))}</div>
+        <div class="t-total${popCls}">${mainStr}</div>
+        <div class="t-today">${subStr}</div>
       </div>
     `;
 
@@ -273,7 +295,7 @@ function renderBoard(users) {
     }
 
     frag.appendChild(row);
-    lastTotal[u.id] = totalLive(u);
+    lastTotal[u.id] = mainVal;
     prevRank[u.id] = rank;
   });
 
@@ -284,6 +306,30 @@ function renderBoard(users) {
 function escapeHTML(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+/* ---------- 榜单维度切换：总榜 / 今日 / 本周 / 本月 ---------- */
+document.querySelectorAll('.vtab').forEach((tab) => {
+  tab.onclick = () => {
+    currentView = tab.dataset.view;
+    document.querySelectorAll('.vtab').forEach((t) => t.classList.toggle('active', t === tab));
+    render();
+  };
+});
+
+/* ---------- 暗黑模式 ---------- */
+let darkMode = localStorage.getItem('moyu_dark') === '1';
+function applyDark() {
+  document.body.classList.toggle('dark', darkMode);
+  const dt = $('darkToggle');
+  if (dt) dt.textContent = darkMode ? '☀️' : '🌙';
+}
+$('darkToggle').onclick = () => {
+  darkMode = !darkMode;
+  localStorage.setItem('moyu_dark', darkMode ? '1' : '0');
+  applyDark();
+  toast(darkMode ? '🌙 夜间摸鱼模式已开启' : '☀️ 切回白天啦');
+};
+applyDark();
 
 /* ---------- 计时按钮 ---------- */
 $('btnStart').onclick = () => { send({ type: 'start', id: myId }); };
@@ -416,5 +462,27 @@ setInterval(() => {
   $('tips').textContent = TIPS[tipIdx];
 }, 4000);
 
-/* ---------- 本地平滑滚动：每 250ms 重绘一次计时相关数字 ---------- */
-setInterval(() => { render(); }, 250);
+/* ---------- 本地平滑滚动 + 本地模式跨期清零 ---------- */
+function clientWeekStr() {
+  const d = new Date();
+  const diff = (d.getDay() + 6) % 7;
+  const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
+  const year = monday.getFullYear();
+  const jan1 = new Date(year, 0, 1);
+  const weekNum = Math.ceil((((monday - jan1) / 86400000) + 1) / 7);
+  return `${year}-W${weekNum}`;
+}
+function clientMonthStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}`;
+}
+let localWeek = clientWeekStr();
+let localMonth = clientMonthStr();
+function checkLocalPeriods() {
+  const w = clientWeekStr();
+  if (localWeek !== w) { localWeek = w; for (const id in localState.users) localState.users[id].weekBase = 0; }
+  const m = clientMonthStr();
+  if (localMonth !== m) { localMonth = m; for (const id in localState.users) localState.users[id].monthBase = 0; }
+}
+
+setInterval(() => { checkLocalPeriods(); render(); }, 250);
