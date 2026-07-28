@@ -331,6 +331,208 @@ body {
 }
 .reset-btn:active { transform: scale(0.97); }
 
+/* ---------- 底部区块：聊天室 + 文案墙 ---------- */
+.bottom-cards {
+  position: relative;
+  z-index: 2;
+  max-width: 1080px;
+  margin: 0 auto 50px;
+  padding: 0 16px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+/* 聊天室 */
+.chat-card { display: flex; flex-direction: column; }
+.chat-online { font-size: 13px; font-weight: 700; color: #1fae84; }
+.chat-list {
+  flex: 1;
+  min-height: 160px;
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 2px;
+}
+.chat-hint { text-align: center; color: #b6a3c8; font-size: 13px; padding: 24px 0; }
+.chat-row { display: flex; gap: 10px; align-items: flex-start; }
+.chat-row.me { flex-direction: row-reverse; }
+.chat-ava {
+  font-size: 22px;
+  width: 38px; height: 38px;
+  flex-shrink: 0;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--pink-soft), var(--blue));
+  border-radius: 12px;
+  overflow: hidden;
+}
+.chat-ava img { width: 100%; height: 100%; object-fit: cover; }
+.chat-body { max-width: 78%; }
+.chat-row.me .chat-body { text-align: right; }
+.chat-meta { font-size: 12px; color: #a78bbd; font-weight: 700; margin-bottom: 2px; }
+.chat-meta b { color: var(--ink); }
+.chat-meta span { margin-left: 6px; }
+.chat-text {
+  display: inline-block;
+  background: #f6eefb;
+  color: var(--ink);
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-word;
+  text-align: left;
+}
+.chat-row.me .chat-text { background: linear-gradient(135deg, var(--pink), var(--purple)); color: #fff; }
+.chat-input-row { display: flex; gap: 10px; margin-top: 14px; }
+.chat-input {
+  flex: 1;
+  border: 2px solid #f0e4f7;
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.chat-input:focus { border-color: var(--purple); }
+.chat-send { flex: 0 0 auto; width: 78px; }
+
+/* 文案墙 */
+.wall-tip { font-size: 12px; color: #a78bbd; font-weight: 700; margin: -6px 0 14px; }
+.wall-list { display: flex; flex-direction: column; gap: 12px; max-height: 340px; overflow-y: auto; }
+.wall-item {
+  background: #fff;
+  border: 2px solid #f1e9f7;
+  border-radius: 16px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.wall-text { flex: 1; font-size: 13px; font-weight: 600; line-height: 1.5; color: var(--ink); }
+
+/* ---------- 抓摸鱼按钮 + 飞行动画 ---------- */
+.catch-btn {
+  flex-shrink: 0;
+  border: 2px solid #ffd0c2;
+  background: linear-gradient(135deg, #ffe3d6, #fff0c7);
+  color: #d8583b;
+  border-radius: 14px;
+  padding: 8px 10px;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.catch-btn:hover { filter: brightness(1.05); }
+.catch-btn:active { transform: scale(0.9) rotate(-8deg); }
+.catch-btn:disabled { opacity: 0; cursor: default; pointer-events: none; }
+
+.catch-fx {
+  position: fixed;
+  right: 8%;
+  bottom: 12%;
+  font-size: 64px;
+  z-index: 90;
+  pointer-events: none;
+  animation: catch-fly 0.95s cubic-bezier(.5,0,.7,1) forwards;
+}
+@keyframes catch-fly {
+  0% { transform: translate(0,0) scale(0.6) rotate(-10deg); opacity: 0; }
+  25% { opacity: 1; }
+  60% { transform: translate(-42vw, -38vh) scale(1.4) rotate(10deg); opacity: 1; }
+  80% { transform: translate(-44vw, -40vh) scale(1.5) rotate(8deg); opacity: 1; }
+  100% { transform: translate(-46vw, -42vh) scale(0.4) rotate(20deg); opacity: 0; }
+}
+.badge.caught { background: #ffe0e0; color: #e23b3b; }
+
+/* ---------- 电子木鱼 + 功德榜 ---------- */
+.merit-mine { margin-left: auto; font-size: 14px; font-weight: 800; color: #b06a2a; }
+.merit-mine b { font-size: 16px; }
+.woodfish-wrap { position: relative; display: grid; place-items: center; margin: 6px 0 4px; }
+.woodfish {
+  font-size: 72px;
+  line-height: 1;
+  border: none;
+  background: radial-gradient(circle at 50% 40%, #ffe6b8, #e9b96b);
+  border-radius: 50%;
+  width: 130px; height: 130px;
+  box-shadow: 0 10px 24px rgba(190,130,40,0.35), inset 0 -8px 14px rgba(150,90,20,0.3);
+  cursor: pointer;
+  transition: transform 0.08s ease;
+  user-select: none;
+}
+.woodfish:active { transform: scale(0.94); }
+.woodfish.knock { animation: wood-knock 0.18s ease; }
+@keyframes wood-knock {
+  0% { transform: scale(1) rotate(0); }
+  50% { transform: scale(0.9) rotate(-4deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+.merit-tip { text-align: center; font-size: 13px; color: #a78bbd; font-weight: 700; margin-bottom: 10px; }
+.merit-pop {
+  position: absolute;
+  top: 8px;
+  font-size: 20px;
+  font-weight: 900;
+  color: #c98a2e;
+  pointer-events: none;
+  animation: merit-up 0.9s ease-out forwards;
+}
+@keyframes merit-up {
+  0% { transform: translateY(0) scale(0.8); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateY(-60px) scale(1.1); opacity: 0; }
+}
+.board-subtitle { margin: 14px 0 10px; font-size: 16px; font-weight: 800; color: var(--ink); }
+.merit-board { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+.merit-row {
+  display: flex; align-items: center; gap: 10px;
+  background: #fff;
+  border: 2px solid #f1e9f7;
+  border-radius: 14px;
+  padding: 8px 12px;
+}
+.merit-row.me { border-color: var(--pink); background: linear-gradient(135deg, #fff5fa, #fef0f6); }
+.m-rank { font-size: 16px; font-weight: 900; width: 28px; text-align: center; flex-shrink: 0; }
+.m-ava { font-size: 22px; width: 36px; height: 36px; display: grid; place-items: center; background: linear-gradient(135deg, var(--pink-soft), var(--blue)); border-radius: 10px; overflow: hidden; flex-shrink: 0; }
+.m-ava img { width: 100%; height: 100%; object-fit: cover; }
+.m-nick { flex: 1; font-weight: 800; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-val { font-weight: 900; font-size: 15px; color: #c98a2e; flex-shrink: 0; }
+
+/* ---------- 小红书爆款 Top30 ---------- */
+.xhs-list { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
+.xhs-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border: 2px solid #f1e9f7;
+  border-radius: 14px;
+  padding: 10px 12px;
+  text-decoration: none;
+  color: var(--ink);
+  transition: transform 0.12s ease, border-color 0.12s;
+}
+.xhs-item:hover { border-color: var(--pink); transform: translateX(2px); }
+.xhs-item:active { transform: scale(0.99); }
+.xhs-rank {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  font-weight: 900; font-size: 13px;
+  background: linear-gradient(135deg, var(--pink), var(--purple));
+  color: #fff;
+}
+.xhs-title { flex: 1; font-size: 14px; font-weight: 700; line-height: 1.4; }
+.xhs-hot { flex-shrink: 0; font-size: 12px; font-weight: 800; color: #ff5a5a; }
+
 /* ---------- 弹窗 ---------- */
 .modal-mask {
   position: fixed; inset: 0;
@@ -466,10 +668,32 @@ body.dark .upload-btn { background: #1e2a40; color: #8cc4ff; border-color: #3a6a
 body.dark .toast { background: rgba(20,15,35,0.95); }
 body.dark .vtab { background: #2a2240; border-color: #3a3050; color: #c4a6f0; }
 body.dark .vtab.active { background: linear-gradient(90deg, var(--pink), var(--purple)); color: #fff; border-color: transparent; }
+body.dark .chat-card { background: #241d3a; }
+body.dark .chat-online { color: #5fe0b0; }
+body.dark .chat-hint { color: #b6a3d8; }
+body.dark .chat-ava { background: linear-gradient(135deg, #4a2f4a, #2a3a5a); color: #fff; }
+body.dark .chat-text { background: #33284d; color: var(--ink); }
+body.dark .chat-input { background: #1c1630; border-color: #3a2f55; color: var(--ink); }
+body.dark .wall-item { background: #2a2240; border-color: #3a3050; }
+body.dark .wall-text { color: var(--ink); }
+body.dark .wall-tip { color: #b6a3d8; }
+body.dark .chat-card, body.dark .merit-card, body.dark .xhs-card { background: #241d3a; }
+body.dark .merit-mine { color: #ffc98a; }
+body.dark .merit-tip { color: #b6a3d8; }
+body.dark .merit-row { background: #2a2240; border-color: #3a3050; }
+body.dark .merit-row.me { border-color: var(--pink); background: linear-gradient(135deg, #34284a, #2e2440); }
+body.dark .m-ava { background: linear-gradient(135deg, #4a2f4a, #2a3a5a); }
+body.dark .m-nick { color: var(--ink); }
+body.dark .m-val { color: #ffc98a; }
+body.dark .xhs-item { background: #2a2240; border-color: #3a3050; color: var(--ink); }
+body.dark .xhs-title { color: var(--ink); }
+body.dark .xhs-hot { color: #ff8a8a; }
+body.dark .catch-btn { background: linear-gradient(135deg, #4a2f2a, #4a3a20); color: #ffb38a; border-color: #6a3a2a; }
 
 /* ---------- 手机端适配 ---------- */
 @media (max-width: 820px) {
   .layout { grid-template-columns: 1fr; }
+  .bottom-cards { grid-template-columns: 1fr; }
   .timer-card { position: static; }
   .title-wrap h1 { font-size: 22px; }
   .big-timer { font-size: 46px; }
