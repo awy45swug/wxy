@@ -16,6 +16,7 @@
       <h1>🐟 摸鱼计时排行榜 🐟</h1>
       <p class="subtitle">带薪摸鱼，从这一刻开始（老板勿入）</p>
     </div>
+    <button id="darkToggle" class="ghost-btn" title="切换暗黑模式">🌙</button>
     <button id="switchUser" class="ghost-btn">🔄 切换用户</button>
   </header>
 
@@ -57,6 +58,12 @@
     <!-- 排行榜卡片 -->
     <section class="card board-card">
       <h2 class="board-title">🏆 摸鱼英雄榜</h2>
+      <div class="view-tabs">
+        <button class="vtab active" data-view="total">总榜</button>
+        <button class="vtab" data-view="today">今日</button>
+        <button class="vtab" data-view="week">本周</button>
+        <button class="vtab" data-view="month">本月</button>
+      </div>
       <div id="leaderboard" class="leaderboard">
         <div class="empty-tip">还没有人摸鱼，快来当第一名！</div>
       </div>
