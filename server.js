@@ -24,9 +24,23 @@ function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
+// 周维度：以周一为一周起点（ISO 周）
+function weekStr() {
+  const d = new Date();
+  const diff = (d.getDay() + 6) % 7; // 距本周一的天数
+  const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
+  const year = monday.getFullYear();
+  const jan1 = new Date(year, 0, 1);
+  const weekNum = Math.ceil((((monday - jan1) / 86400000) + 1) / 7);
+  return `${year}-W${weekNum}`;
+}
+function monthStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}`;
+}
 
 // 共享状态：users 以 id 为 key
-let state = { day: todayStr(), users: {} };
+let state = { day: todayStr(), week: weekStr(), month: monthStr(), users: {} };
 
 function loadState() {
   try {
@@ -38,6 +52,8 @@ function loadState() {
     console.error('读取存档失败，使用空状态:', e.message);
   }
   if (!state.day) state.day = todayStr();
+  if (!state.week) state.week = weekStr();
+  if (!state.month) state.month = monthStr();
   if (!state.users) state.users = {};
 }
 loadState();
@@ -64,6 +80,24 @@ function checkDay() {
     saveState();
   }
 }
+// 跨周自动清零本周数据（周一为起点）
+function checkWeek() {
+  const t = weekStr();
+  if (state.week !== t) {
+    state.week = t;
+    for (const id in state.users) state.users[id].weekBase = 0;
+    saveState();
+  }
+}
+// 跨月自动清零本月数据
+function checkMonth() {
+  const t = monthStr();
+  if (state.month !== t) {
+    state.month = t;
+    for (const id in state.users) state.users[id].monthBase = 0;
+    saveState();
+  }
+}
 
 // 把服务端内部状态转成可下发的前端结构（保留 base 字段，便于客户端平滑滚动）
 function toClientUser(u) {
@@ -75,12 +109,16 @@ function toClientUser(u) {
     runStart: u.runStart || null,
     pending: u.pending || 0,
     totalBase: u.totalBase || 0,
-    todayBase: u.todayBase || 0
+    todayBase: u.todayBase || 0,
+    weekBase: u.weekBase || 0,
+    monthBase: u.monthBase || 0
   };
 }
 
 function broadcast() {
   checkDay();
+  checkWeek();
+  checkMonth();
   const payload = JSON.stringify({
     type: 'state',
     serverNow: now(),
@@ -155,7 +193,7 @@ wss.on('connection', (ws) => {
       if (!u) {
         u = {
           id,
-          totalBase: 0, todayBase: 0, pending: 0,
+          totalBase: 0, todayBase: 0, weekBase: 0, monthBase: 0, pending: 0,
           running: false, runStart: null,
           nickname: msg.nickname || '匿名咸鱼',
           avatar: msg.avatar || '🐟',
@@ -193,6 +231,8 @@ wss.on('connection', (ws) => {
       if (u.running && u.runStart) add += (now() - u.runStart) / 1000;
       u.totalBase = (u.totalBase || 0) + add;
       u.todayBase = (u.todayBase || 0) + add;
+      u.weekBase = (u.weekBase || 0) + add;
+      u.monthBase = (u.monthBase || 0) + add;
       u.pending = 0;
       u.running = false;
       u.runStart = null;
@@ -202,7 +242,7 @@ wss.on('connection', (ws) => {
   });
 });
 
-// 每秒广播一次，保证排行榜实时滚动、跨天清零能及时生效
+// 每秒广播一次，保证排行榜实时滚动、跨天/跨周/跨月清零能及时生效
 setInterval(broadcast, 1000);
 
 server.listen(PORT, () => {
