@@ -45,6 +45,44 @@ const PRAISES = [
 // 吐槽 / 夸奖轮播索引：每 2 秒切一次
 let rotateIdx = 0;
 
+/* ---------- 偷摸鱼（开心农场风） ---------- */
+const STEAL_MIN = 60;    // 对方总时长低于 60 秒不可偷
+const STEAL_CD = 5000;   // 冷却 5 秒
+let myLastSteal = 0;     // 上次偷的时间戳（用于前端禁用按钮）
+
+/* ---------- 每日摸鱼运势抽签 ---------- */
+const FORTUNE_YI = ['划水', '带薪发呆', '摸鱼一小时', '摸鱼划水两不误', '提前溜号', '假装开会', '工位养生', '云吸猫', '带薪emo'];
+const FORTUNE_JI = ['加班', '写周报', '开长会', '被拉群', '背锅', '无效社交', '周末加班', '接急活'];
+let currentFortune = null;
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 131 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+function dayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+function computeFortune(id) {
+  const seed = hashStr((id || '') + dayKey());
+  const yi = FORTUNE_YI[seed % FORTUNE_YI.length];
+  const ji = FORTUNE_JI[Math.floor(seed / 7) % FORTUNE_JI.length];
+  const luck = 60 + (seed % 40); // 60~99
+  return { yi, ji, luck };
+}
+function renderFortune() {
+  if (!myId) return;
+  const f = computeFortune(myId);
+  currentFortune = f;
+  const yi = $('fortuneYi'), ji = $('fortuneJi'), luck = $('fortuneLuck');
+  if (yi) yi.textContent = f.yi;
+  if (ji) ji.textContent = f.ji;
+  if (luck) {
+    luck.textContent = f.luck;
+    luck.className = 'fortune-luck-val ' + (f.luck >= 90 ? 'luck-high' : f.luck >= 75 ? 'luck-mid' : 'luck-low');
+  }
+}
+
 // 小红书每日爆款 Top30（后端实时拉取；拉不到时用这份精选榜兜底）
 const XHS_FALLBACK = [
   '打工人的工位减脂餐，一周不重样', '显眼包穿搭才是夏日顶流', '带薪摸鱼一小时续命一整天',
@@ -140,6 +178,16 @@ ws.onmessage = (e) => {
     xhsLive = !!msg.live;
     xhsUpdated = msg.updated || 0;
     renderXhs();
+  } else if (msg.type === 'drawState') {
+    applyDrawState(msg);
+  } else if (msg.type === 'draw') {
+    drawRemoteSegs(msg.segs);
+  } else if (msg.type === 'drawClear') {
+    drawClearCanvas();
+  } else if (msg.type === 'drawGuess') {
+    if (msg.id !== myId) toast(`💬 ${msg.name} 猜：“${msg.text}”`);
+  } else if (msg.type === 'drawCorrect') {
+    drawCorrectFx(msg);
   }
 };
 ws.onerror = () => { if (!wsConnected) enterLocalMode(); };
@@ -160,6 +208,7 @@ function enterLocalMode() {
   if (myNick) {
     handleLocal({ type: 'join', id: myId, nickname: myNick, avatar: myAvatar });
     handleLocal({ type: 'start', id: myId }); // 本地模式也自动开始计时
+    renderFortune(); // 进屋抽今日运势
     hideModal();
   }
   else showModal();
@@ -183,6 +232,16 @@ function handleLocal(obj) {
     if (u.running && u.runStart) add += (now - u.runStart) / 1000;
     u.totalBase += add; u.todayBase += add; u.weekBase += add; u.monthBase += add;
     u.pending = 0; u.running = false; u.runStart = null;
+  } else if (obj.type === 'steal') {
+    const t = localState.users[obj.target]; const u = localState.users[id];
+    if (!t || !u || id === obj.target) return;
+    if ((t.totalBase || 0) < STEAL_MIN) return;
+    let amt = Math.max(STEAL_MIN, Math.round((t.totalBase || 0) * 0.05));
+    amt = Math.min(amt, t.totalBase);
+    const tamt = Math.min(amt, t.todayBase || 0);
+    t.totalBase -= amt; u.totalBase += amt;
+    t.todayBase -= tamt; u.todayBase += tamt;
+    t.stolen = (t.stolen || 0) + 1; u.stealCount = (u.stealCount || 0) + 1;
   }
   saveLocal();
   serverState = { users: Object.values(localState.users) };
@@ -199,6 +258,7 @@ function send(obj) {
 function sendJoin() {
   send({ type: 'join', id: myId, nickname: myNick, avatar: myAvatar });
   send({ type: 'start', id: myId }); // 进入网页自动开始计时
+  renderFortune(); // 进屋抽今日运势
 }
 
 /* ---------- 时间计算 ---------- */
@@ -342,8 +402,12 @@ function renderBoard(users) {
     }
     const liveBadge = u.running ? '<span class="badge live">🌊 摸鱼中</span>' : '';
     const caughtBadge = u.caught > 0 ? `<span class="badge caught">🚨被抓${u.caught}</span>` : '';
+    const stolenBadge = u.stolen > 0 ? `<span class="badge stolen">🚨被偷${u.stolen}</span>` : '';
     // 抓摸鱼：只有对方正在摸鱼中才能抓，否则按钮暗掉不可点
     const canCatch = u.running && u.id !== myId;
+    // 偷摸鱼：对方攒够时长且自己不在冷却，才能偷
+    const stealCdLeft = myLastSteal ? Math.max(0, STEAL_CD - (Date.now() - myLastSteal)) : 0;
+    const canSteal = u.id !== myId && (u.totalBase || 0) >= STEAL_MIN && stealCdLeft <= 0;
 
     const mainStr = fmt(mainVal);
     // 数字变化触发 pop 动画
@@ -356,13 +420,16 @@ function renderBoard(users) {
       <div class="ava">${avatarHTML(u.avatar)}</div>
       <div class="info">
         <div class="nick">${escapeHTML(u.nickname || '匿名咸鱼')}</div>
-        ${badge}${liveBadge}${caughtBadge}
+        ${badge}${liveBadge}${caughtBadge}${stolenBadge}
       </div>
-      <div class="times">
-        <div class="t-total${popCls}">${mainStr}</div>
-        <div class="t-today">${subStr}</div>
+        <div class="times">
+          <div class="t-total${popCls}">${mainStr}</div>
+          <div class="t-today">${subStr}</div>
+        </div>
+      <div class="acts">
+        <button class="steal-btn" data-target="${u.id}" ${canSteal ? '' : 'disabled'} title="${u.id === myId ? '不能偷自己' : ((u.totalBase || 0) >= STEAL_MIN ? (stealCdLeft > 0 ? '手速太快，歇会儿再偷' : '偷ta一点摸鱼时长') : 'ta还没攒够，偷不动')}">🥷</button>
+        <button class="catch-btn" data-target="${u.id}" ${canCatch ? '' : 'disabled'} title="${u.id === myId ? '不能抓自己' : (u.running ? '抓ta摸鱼！' : 'ta没在摸鱼，抓不了')}">🤚</button>
       </div>
-      <button class="catch-btn" data-target="${u.id}" ${canCatch ? '' : 'disabled'} title="${u.id === myId ? '不能抓自己' : (u.running ? '抓ta摸鱼！' : 'ta没在摸鱼，抓不了')}">🤚</button>
     `;
 
     // 排名变动 -> bump 动画
@@ -513,6 +580,21 @@ $('joinBtn').onclick = () => {
   toast(`🐟 欢迎进场，${nick}！`);
 };
 
+/* ---------- 晒运势 ---------- */
+$('shareFortune').onclick = () => {
+  if (!currentFortune) renderFortune();
+  if (!myNick) { toast('先加入摸鱼场才能晒运势'); return; }
+  const f = currentFortune;
+  const text = `🔮 ${myNick} 的今日摸鱼运势｜宜${f.yi} · 忌${f.ji} · 幸运值 ${f.luck}`;
+  if (mode === 'online' && ws.readyState === 1) {
+    send({ type: 'chat', id: myId, text });
+  } else if (mode === 'local') {
+    toast('📱 本地模式不支持晒到茶水间');
+  }
+  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+  toast('🔮 运势已晒，也帮你复制到剪贴板啦～');
+};
+
 /* ---------- 轻提示 ---------- */
 let toastTimer = null;
 function toast(text) {
@@ -600,8 +682,10 @@ $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendC
 
 /* ---------- 抓摸鱼（互动举报） ---------- */
 $('leaderboard').addEventListener('click', (e) => {
-  const b = e.target.closest('.catch-btn');
-  if (b && b.dataset.target) sendCatch(b.dataset.target);
+  const cb = e.target.closest('.catch-btn');
+  if (cb && cb.dataset.target) sendCatch(cb.dataset.target);
+  const sb = e.target.closest('.steal-btn');
+  if (sb && sb.dataset.target) sendSteal(sb.dataset.target);
 });
 function sendCatch(targetId) {
   if (mode === 'local') { toast('📱 本地模式暂不支持抓人'); return; }
@@ -617,6 +701,27 @@ function catchFx() {
   const el = document.createElement('div');
   el.className = 'catch-fx';
   el.textContent = '🤚';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 950);
+}
+
+/* ---------- 偷摸鱼（开心农场风） ---------- */
+function sendSteal(targetId) {
+  if (mode === 'local') { toast('📱 本地模式暂不支持偷摸鱼'); return; }
+  if (!myNick) { toast('先加入摸鱼场才能偷'); return; }
+  if (myLastSteal && Date.now() - myLastSteal < STEAL_CD) { toast('🥷 手速太快，歇会儿再偷'); return; }
+  send({ type: 'steal', id: myId, target: targetId });
+  myLastSteal = Date.now();
+  render();
+  const t = serverState.users.find((u) => u.id === targetId);
+  const name = t ? (t.nickname || '匿名咸鱼') : '某人';
+  stealFx();
+  toast(`🥷 偷偷摸了 ${name} 一把！`);
+}
+function stealFx() {
+  const el = document.createElement('div');
+  el.className = 'catch-fx';
+  el.textContent = '🥷';
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 950);
 }
@@ -714,3 +819,209 @@ function renderXhs() {
   }
 }
 renderXhs();
+renderFortune(); // 启动即抽今日运势（待加入也会随 join 刷新）
+
+/* =========================================================
+ * 你画我猜（并入摸鱼网页，复用同一 WebSocket 房间，真·多人实时）
+ * 画师看词作画，其他人猜词；笔画实时同步、晚进者可回放最近笔画
+ * ========================================================= */
+let dgState = { word: null, cat: null, drawerId: null, round: 0, ops: [] };
+let dgDrawing = false, dgLast = null, dgColor = '#1C1C1E', dgBrush = 6, dgErase = false;
+let dgReady = false; // 画布是否已初始化
+const dgCanvas = () => $('dgBoard');
+
+// 高 DPI 画布初始化
+function dgSetupCanvas() {
+  const cv = dgCanvas();
+  if (!cv) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const r = cv.getBoundingClientRect();
+  cv.width = Math.round(r.width * dpr);
+  cv.height = Math.round(r.height * dpr);
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  cv._ctx = ctx; cv._w = r.width; cv._h = r.height;
+  dgReady = true;
+}
+
+// 把屏幕坐标转成 0~1 归一化坐标（跨设备分辨率一致）
+function dgNorm(e) {
+  const cv = dgCanvas(); const r = cv.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return { nx: (t.clientX - r.left) / r.width, ny: (t.clientY - r.top) / r.height };
+}
+// 在本地画一条归一化线段
+function dgDrawSeg(seg) {
+  const cv = dgCanvas(); if (!cv || !cv._ctx) return;
+  const ctx = cv._ctx;
+  ctx.strokeStyle = seg.c || '#1C1C1E';
+  ctx.lineWidth = seg.w || 6;
+  ctx.beginPath();
+  ctx.moveTo(seg.x1 * cv._w, seg.y1 * cv._h);
+  ctx.lineTo(seg.x2 * cv._w, seg.y2 * cv._h);
+  ctx.stroke();
+}
+function drawRemoteSegs(segs) {
+  if (!dgReady) return;
+  (segs || []).forEach(dgDrawSeg);
+}
+function drawClearCanvas() {
+  const cv = dgCanvas(); if (!cv || !cv._ctx) return;
+  cv._ctx.clearRect(0, 0, cv.width, cv.height);
+}
+
+// 画师作画
+function dgStart(e) {
+  if (!dgAmDrawer()) return;
+  dgDrawing = true; dgLast = dgNorm(e); e.preventDefault();
+}
+function dgMove(e) {
+  if (!dgDrawing || !dgAmDrawer()) return;
+  const p = dgNorm(e);
+  const seg = { x1: dgLast.nx, y1: dgLast.ny, x2: p.nx, y2: p.ny,
+    c: dgErase ? '#FCFCFD' : dgColor, w: dgErase ? dgBrush * 2.2 : dgBrush };
+  dgDrawSeg(seg);
+  // 实时发给其他人（归一化坐标）
+  send({ type: 'drawStroke', id: myId, segs: [seg] });
+  dgLast = p; e.preventDefault();
+}
+function dgEnd() { dgDrawing = false; }
+
+function dgAmDrawer() { return dgState.drawerId && dgState.drawerId === myId; }
+function dgActive() { return !!dgState.drawerId; }
+
+// 应用后端下发的局状态
+function applyDrawState(s) {
+  dgState = { word: s.word, cat: s.cat, drawerId: s.drawerId, round: s.round || 0, ops: s.ops || [] };
+  dgRender();
+  // 回放最近笔画（清空后重画）
+  drawClearCanvas();
+  (dgState.ops || []).forEach(dgDrawSeg);
+}
+function dgRender() {
+  const round = $('dgRound'); if (round) round.textContent = dgState.round || 1;
+  const cat = $('dgCat'); if (cat) cat.textContent = dgState.cat || '职场';
+  const drawerUser = serverState.users.find(u => u.id === dgState.drawerId);
+  const dn = $('dgDrawer'); if (dn) dn.textContent = drawerUser ? (drawerUser.nickname || '匿名咸鱼') : (dgAmDrawer() ? '你' : '—');
+  const wordEl = $('dgWord');
+  const startBtn = $('dgStartBtn'), nextBtn = $('dgNextBtn');
+  const tools = $('dgTools'), guessInput = $('dgGuessInput'), guessSend = $('dgGuessSend');
+  const hint = $('dgHint');
+
+  if (!dgActive()) {
+    if (wordEl) { wordEl.textContent = '点下方按钮开局'; wordEl.classList.remove('hide'); }
+    if (startBtn) startBtn.classList.remove('hidden');
+    if (nextBtn) nextBtn.classList.add('hidden');
+    if (tools) tools.classList.add('dim');
+    if (guessInput) { guessInput.disabled = true; guessInput.placeholder = '还没开局呢～'; }
+    if (guessSend) guessSend.disabled = true;
+    if (hint) hint.textContent = '点「开始游戏」当画师，开局后其他人来猜 🎨';
+  } else if (dgAmDrawer()) {
+    if (wordEl) { wordEl.textContent = dgState.word || '—'; wordEl.classList.remove('hide'); }
+    if (startBtn) startBtn.classList.add('hidden');
+    if (nextBtn) nextBtn.classList.remove('hidden');
+    if (tools) tools.classList.remove('dim');
+    if (guessInput) { guessInput.disabled = true; guessInput.placeholder = '你是画师，不能猜自己的词 🤫'; }
+    if (guessSend) guessSend.disabled = true;
+    if (hint) hint.textContent = '你正在画，安静作画，等其他人猜～';
+  } else {
+    if (wordEl) { wordEl.textContent = '？ ？ ？'; wordEl.classList.add('hide'); }
+    if (startBtn) startBtn.classList.add('hidden');
+    if (nextBtn) nextBtn.classList.remove('hidden');
+    if (tools) tools.classList.add('dim');
+    if (guessInput) { guessInput.disabled = false; guessInput.placeholder = '看画猜词，输入后点猜…'; }
+    if (guessSend) guessSend.disabled = false;
+    if (hint) hint.textContent = '画师正在作画，猜对了积分 +10 🔍';
+  }
+  dgRenderScore();
+}
+function dgRenderScore() {
+  const list = $('dgScoreList'); if (!list) return;
+  const users = (serverState.users || []).slice().sort((a, b) => (b.drawScore || 0) - (a.drawScore || 0));
+  const ranked = users.filter(u => (u.drawScore || 0) > 0);
+  if (!ranked.length) { list.innerHTML = '<span class="it" style="color:#8E8E93">还没人得分</span>'; return; }
+  list.innerHTML = ranked.map(u => {
+    const av = avatarHTML(u.avatar);
+    return `<span class="it ${u.id === myId ? 'me' : ''}"><span>${av}</span><span>${escapeHTML(u.nickname || '匿名咸鱼')}</span><b>${u.drawScore}</b></span>`;
+  }).join('');
+}
+function drawCorrectFx(msg) {
+  if (msg.id === myId) {
+    toast('✅ 你猜对了！积分 +10 🎉');
+    dgPop('✅', '猜对了 +10');
+  } else {
+    toast(`🎨 ${msg.name} 猜对了「${msg.word}」+10`);
+  }
+}
+function dgPop(big, tx) {
+  let p = $('dgPopEl');
+  if (!p) {
+    p = document.createElement('div'); p.id = 'dgPopEl'; p.className = 'dg-pop';
+    p.innerHTML = '<div class="big"></div><div class="tx"></div>';
+    document.body.appendChild(p);
+  }
+  p.querySelector('.big').textContent = big;
+  p.querySelector('.tx').textContent = tx;
+  p.classList.add('show');
+  setTimeout(() => p.classList.remove('show'), 1100);
+}
+
+// 打开 / 关闭游戏层
+function openDrawGame() {
+  if (!myNick) { toast('先加入摸鱼场才能玩你画我猜哦'); showModal(); return; }
+  $('drawGame').classList.remove('hidden');
+  // 画布需在可见后才能取到尺寸
+  setTimeout(() => { dgSetupCanvas(); drawClearCanvas(); (dgState.ops || []).forEach(dgDrawSeg); dgRender(); }, 30);
+}
+function closeDrawGame() { $('drawGame').classList.add('hidden'); }
+
+$('openDraw').onclick = openDrawGame;
+$('drawClose').onclick = closeDrawGame;
+$('dgStartBtn').onclick = () => { send({ type: 'drawStart', id: myId }); };
+$('dgNextBtn').onclick = () => { send({ type: 'drawNext', id: myId }); };
+
+// 猜词
+function dgSendGuess() {
+  const inp = $('dgGuessInput');
+  const text = inp.value.trim();
+  if (!text) return;
+  if (dgAmDrawer()) { toast('你是画师，不能猜自己的词 🤫'); return; }
+  if (!dgActive()) { toast('还没开局，点「开始游戏」先'); return; }
+  send({ type: 'drawGuess', id: myId, text });
+  inp.value = '';
+}
+$('dgGuessSend').onclick = dgSendGuess;
+$('dgGuessInput').addEventListener('keydown', e => { if (e.key === 'Enter') dgSendGuess(); });
+
+// 工具：颜色 / 橡皮 / 清空 / 笔刷
+document.querySelectorAll('.dg-sw').forEach(sw => {
+  sw.onclick = () => {
+    document.querySelectorAll('.dg-sw').forEach(s => s.classList.remove('active'));
+    sw.classList.add('active'); dgColor = sw.dataset.c; dgErase = false;
+  };
+});
+$('dgEraser').onclick = () => { dgErase = !dgErase; toast(dgErase ? '橡皮开' : '橡皮关'); };
+$('dgClear').onclick = () => {
+  if (!dgAmDrawer()) { toast('只有画师能清空画布'); return; }
+  drawClearCanvas(); send({ type: 'drawClear', id: myId });
+};
+$('dgBrush').oninput = e => dgBrush = +e.target.value;
+
+// 画布事件（鼠标 + 触屏）
+(function bindDgCanvas() {
+  const cv = dgCanvas();
+  if (!cv) return;
+  cv.addEventListener('mousedown', dgStart);
+  cv.addEventListener('mousemove', dgMove);
+  window.addEventListener('mouseup', dgEnd);
+  cv.addEventListener('touchstart', dgStart, { passive: false });
+  cv.addEventListener('touchmove', dgMove, { passive: false });
+  cv.addEventListener('touchend', dgEnd);
+})();
+
+// 窗口变化时重设画布并回放
+window.addEventListener('resize', () => {
+  if ($('drawGame').classList.contains('hidden')) return;
+  dgSetupCanvas(); drawClearCanvas(); (dgState.ops || []).forEach(dgDrawSeg);
+});
