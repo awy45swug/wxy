@@ -71,6 +71,37 @@
     </section>
   </main>
 
+  <!-- 底部区块：聊天室 + 电子木鱼 + 小红书爆款 -->
+  <div class="bottom-cards">
+    <!-- 在线聊天室 -->
+    <section class="card chat-card">
+      <h2 class="board-title">💬 摸鱼茶水间 <span class="chat-online" id="chatOnline">· 在线</span></h2>
+      <div id="chatList" class="chat-list"></div>
+      <div class="chat-input-row">
+        <input id="chatInput" class="chat-input" maxlength="200" placeholder="说点啥…（老板听不到）" />
+        <button id="chatSend" class="btn btn-start chat-send">发送</button>
+      </div>
+    </section>
+
+    <!-- 电子木鱼 + 功德榜 -->
+    <section class="card merit-card">
+      <h2 class="board-title">🪵 电子木鱼 <span class="merit-mine">我的功德 +<b id="myMerit">0</b></span></h2>
+      <div class="woodfish-wrap">
+        <button id="woodfish" class="woodfish">🪵</button>
+      </div>
+      <div class="merit-tip">老板骂我我敲鱼，烦恼随功德去 🔔</div>
+      <h3 class="board-subtitle">📿 功德榜</h3>
+      <div id="meritBoard" class="merit-board"></div>
+    </section>
+
+    <!-- 小红书每日爆款 Top30 -->
+    <section class="card xhs-card">
+      <h2 class="board-title">🔥 小红书今日爆款 TOP30</h2>
+      <div class="wall-tip" id="xhsTip">实时抓取每日最热，点一下去小红书搜同款 🔍</div>
+      <div id="xhsList" class="xhs-list"></div>
+    </section>
+  </div>
+
   <!-- 加入 / 切换用户弹窗 -->
   <div id="joinModal" class="modal-mask">
     <div class="modal-box">
