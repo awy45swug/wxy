@@ -18,6 +18,7 @@
     </div>
     <button id="darkToggle" class="ghost-btn" title="切换暗黑模式">🌙</button>
     <button id="switchUser" class="ghost-btn">🔄 切换用户</button>
+    <button id="openDraw" class="ghost-btn draw-open">🎨 你画我猜</button>
   </header>
 
   <div id="tips" class="tips">💡 摸鱼有益身心健康（假的）</div>
@@ -72,6 +73,17 @@
 
   <!-- 底部区块：聊天室 + 电子木鱼 + 小红书爆款 -->
   <div class="bottom-cards">
+    <!-- 今日摸鱼运势 -->
+    <section class="card fortune-card">
+      <h2 class="board-title">🔮 今日摸鱼运势</h2>
+      <div class="fortune-body">
+        <div class="fortune-line">宜 <b id="fortuneYi" class="fortune-yi">划水</b></div>
+        <div class="fortune-line">忌 <b id="fortuneJi" class="fortune-ji">加班</b></div>
+        <div class="fortune-luck">幸运值 <span id="fortuneLuck" class="fortune-luck-val luck-mid">88</span></div>
+      </div>
+      <button id="shareFortune" class="btn btn-start fortune-share">🌟 晒运势</button>
+    </section>
+
     <!-- 在线聊天室 -->
     <section class="card chat-card">
       <h2 class="board-title">💬 摸鱼茶水间 <span class="chat-online" id="chatOnline">· 在线</span></h2>
@@ -135,6 +147,53 @@
 
   <!-- 轻提示 -->
   <div id="toast" class="toast hidden"></div>
+
+  <!-- 你画我猜游戏层（全屏覆盖，苹果极简风） -->
+  <div id="drawGame" class="draw-game hidden">
+    <div class="dg-top">
+      <button id="drawClose" class="dg-close">‹ 返回</button>
+      <div class="dg-round">第 <b id="dgRound">1</b> 轮 · 画师 <b id="dgDrawer">—</b></div>
+    </div>
+
+    <div class="dg-wordmask">
+      <div class="dg-wm-l">
+        <span class="dg-lbl">本轮题目</span>
+        <span id="dgWord" class="dg-word">点下方按钮开局</span>
+      </div>
+      <span id="dgCat" class="dg-cat">职场</span>
+    </div>
+
+    <div class="dg-score">
+      <span class="dg-score-t">积分</span>
+      <div id="dgScoreList" class="dg-score-list"></div>
+    </div>
+
+    <div class="dg-canvas-card">
+      <canvas id="dgBoard"></canvas>
+      <div class="dg-tools" id="dgTools">
+        <span class="dg-sw active" data-c="#1C1C1E" style="background:#1C1C1E"></span>
+        <span class="dg-sw" data-c="#86D1A8" style="background:#86D1A8"></span>
+        <span class="dg-sw" data-c="#FF9F68" style="background:#FF9F68"></span>
+        <span class="dg-sw" data-c="#5AA9F0" style="background:#5AA9F0"></span>
+        <span class="dg-sw" data-c="#E5689A" style="background:#E5689A"></span>
+        <span class="dg-sw" data-c="#C8A25B" style="background:#C8A25B"></span>
+        <span class="dg-tool" id="dgEraser">橡皮</span>
+        <span class="dg-tool" id="dgClear">清空</span>
+        <span class="dg-brush">细<input type="range" id="dgBrush" min="2" max="22" value="6"></span>
+      </div>
+    </div>
+
+    <div class="dg-guess">
+      <input id="dgGuessInput" placeholder="看画猜词，输入后点猜…" maxlength="20" autocomplete="off" />
+      <button id="dgGuessSend">猜</button>
+    </div>
+    <div class="dg-hint" id="dgHint">开局后，画师看词作画，其他人猜词 🎨</div>
+
+    <div class="dg-actions">
+      <button id="dgStartBtn" class="dg-start">🎮 开始游戏（我当画师）</button>
+      <button id="dgNextBtn" class="dg-next hidden">下一轮</button>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
