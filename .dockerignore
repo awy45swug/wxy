@@ -1,0 +1,6 @@
+node_modules
+data.json
+*.log
+moyu-deploy.zip
+.git
+.gitignore
