@@ -1,0 +1,12 @@
+{
+  "name": "moyu-timer-leaderboard",
+  "version": "1.0.0",
+  "description": "多人共享摸鱼计时排行榜 - 实时联机版",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.21.1"
+  }
+}
