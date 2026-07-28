@@ -67,7 +67,6 @@
       <div id="leaderboard" class="leaderboard">
         <div class="empty-tip">还没有人摸鱼，快来当第一名！</div>
       </div>
-      <button id="btnReset" class="reset-btn">🧹 清空所有人记录</button>
     </section>
   </main>
 
@@ -85,9 +84,26 @@
 
     <!-- 电子木鱼 + 功德榜 -->
     <section class="card merit-card">
-      <h2 class="board-title">🪵 电子木鱼 <span class="merit-mine">我的功德 +<b id="myMerit">0</b></span></h2>
+      <h2 class="board-title">🔔 电子木鱼 <span class="merit-mine">我的功德 +<b id="myMerit">0</b></span></h2>
       <div class="woodfish-wrap">
-        <button id="woodfish" class="woodfish">🪵</button>
+        <button id="woodfish" class="woodfish" aria-label="敲木鱼积功德">
+          <svg viewBox="0 0 120 112" xmlns="http://www.w3.org/2000/svg" class="woodfish-svg">
+            <defs>
+              <radialGradient id="woodG" cx="38%" cy="32%" r="80%">
+                <stop offset="0%" stop-color="#d99a5b"/>
+                <stop offset="52%" stop-color="#b06f33"/>
+                <stop offset="100%" stop-color="#7c4519"/>
+              </radialGradient>
+            </defs>
+            <ellipse cx="60" cy="66" rx="50" ry="42" fill="#5a3210" opacity="0.22"/>
+            <path d="M60 20 C94 20 110 44 110 68 C110 92 88 104 60 104 C30 104 10 90 10 64 C10 40 28 20 60 20 Z" fill="url(#woodG)" stroke="#6b3c14" stroke-width="3"/>
+            <path d="M32 30 Q60 14 88 30 Q76 23 60 23 Q44 23 32 30 Z" fill="#3e2208"/>
+            <ellipse cx="62" cy="70" rx="18" ry="13" fill="#5a3210" opacity="0.5"/>
+            <path d="M22 62 Q40 52 58 56" stroke="#8a5523" stroke-width="2.5" fill="none" opacity="0.6"/>
+            <path d="M70 90 Q88 82 100 86" stroke="#8a5523" stroke-width="2.5" fill="none" opacity="0.5"/>
+            <circle cx="60" cy="16" r="4" fill="#5a3210"/>
+          </svg>
+        </button>
       </div>
       <div class="merit-tip">老板骂我我敲鱼，烦恼随功德去 🔔</div>
       <h3 class="board-subtitle">📿 功德榜</h3>
