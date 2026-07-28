@@ -250,14 +250,6 @@ wss.on('connection', (ws) => {
     let msg;
     try { msg = JSON.parse(buf.toString()); } catch (e) { return; }
 
-    // 重置不需要 id，且应最先处理（清空所有人）
-    if (msg.type === 'reset') {
-      state.users = {};
-      saveState();
-      broadcast();
-      return;
-    }
-
     const id = msg.id;
     if (!id) return;
 
@@ -339,6 +331,7 @@ wss.on('connection', (ws) => {
       if (!targetId || targetId === id) return;
       const t = state.users[targetId];
       if (!t) return;
+      if (!t.running) return; // 只能抓正在摸鱼中的人
       t.caught = (t.caught || 0) + 1;
       u.catchCount = (u.catchCount || 0) + 1;
       const who = u.nickname || '匿名咸鱼';
