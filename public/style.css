@@ -1007,3 +1007,136 @@ body.dark .catch-btn { background: linear-gradient(135deg, #4a2f2a, #4a3a20); co
 .dg-pop .big { font-size: 30px; }
 .dg-pop .tx { font-size: 14px; font-weight: 600; margin-top: 6px; }
 
+/* 你画我猜：词库分类选择 */
+.dg-banks { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dg-bank-lbl { font-size: 12px; color: #8E8E93; font-weight: 600; }
+.dg-bank { border: 1.5px solid #E5E5EA; background: #fff; color: #6B6B70;
+  font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+  cursor: pointer; transition: all .15s ease; }
+.dg-bank:hover { border-color: #86D1A8; color: #3E9E6E; }
+.dg-bank.active { background: #E8F7EF; border-color: #86D1A8; color: #2E8B5F; }
+
+/* 谁是卧底：弃票按钮 */
+.sp-vote-btn.sp-abstain { background: #F2F2F7; color: #8E8E93; border-style: dashed; }
+.sp-vote-btn.sp-abstain:hover:not(:disabled) { background: #E5E5EA; color: #6B6B70; }
+
+/* D3 晒榜按钮 */
+.board-share { float: right; border: 1.5px solid #E5E5EA; background: #fff; color: #6B6B70;
+  font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 999px;
+  cursor: pointer; transition: all .15s ease; }
+.board-share:hover { border-color: #86D1A8; color: #2E8B5F; background: #E8F7EF; }
+
+/* ===== 你画我猜 / 谁是卧底 UI 升级（一致性视觉） ===== */
+
+/* 面板入场动画 */
+.draw-game:not(.hidden), .spy-game:not(.hidden) { animation: panelIn .28s ease; }
+@keyframes panelIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* —— 你画我猜 —— */
+.dg-top { flex-wrap: wrap; }
+.dg-role { font-size: 12.5px; font-weight: 600; color: #6B6B70; background: #EFEFF4;
+  padding: 5px 12px; border-radius: 999px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 52%; }
+.dg-role.me { color: #fff; background: linear-gradient(135deg, #86D1A8, #5FB98C);
+  box-shadow: 0 4px 12px rgba(134,209,168,.32); }
+
+/* 词库独立成行 */
+.dg-bankbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+  background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.05); padding: 8px 12px; }
+.dg-bankbar .dg-banks { gap: 6px; flex-wrap: wrap; }
+
+/* 题目卡：左侧强调条 + 画师态高亮 */
+.dg-wordmask { border-left: 4px solid #86D1A8; transition: border-color .2s, box-shadow .2s; }
+.dg-wordmask.drawer { border-left-color: #FF9F68; box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 6px 20px rgba(255,159,104,.14); }
+.dg-wordmask.drawer .dg-word { color: #E8853B; }
+
+/* 调色板分组 */
+.dg-palette { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: #F4F4F6; border-radius: 12px; padding: 8px 10px; }
+.dg-sw { width: 24px; height: 24px; }
+
+/* 画布：更像画板 */
+.dg-canvas-card { border: 1px solid #ECECEF; }
+#dgBoard { border: 1px solid #EFEFF2; box-shadow: inset 0 1px 3px rgba(0,0,0,.04); }
+
+/* 猜词栏强化 */
+.dg-guess input { box-shadow: 0 1px 3px rgba(0,0,0,.04); transition: box-shadow .15s, border-color .15s; }
+.dg-guess input:focus { box-shadow: 0 0 0 3px rgba(134,209,168,.18); }
+
+/* 按钮悬停/按下反馈 */
+.dg-start, .dg-next, .dg-join { transition: transform .12s ease, box-shadow .15s ease, background .15s; }
+.dg-start:active, .dg-next:active, .dg-join:active { transform: translateY(1px) scale(.99); }
+.dg-tool { transition: background .12s, transform .12s; }
+.dg-tool:hover:not(.disabled) { border-color: #86D1A8; }
+.dg-tool:active:not(.disabled) { transform: scale(.96); }
+
+/* —— 谁是卧底 —— */
+/* 阶段进度条：描述 → 投票 → 结算 */
+.spy-steps { display: flex; align-items: center; margin-bottom: 14px;
+  background: #fff; border-radius: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.06); padding: 12px 8px; }
+.sp-step { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  position: relative; color: #C7C7CC; font-size: 12px; font-weight: 600; }
+.sp-step::before { content: ''; position: absolute; top: 13px; left: -50%; width: 100%; height: 2px; background: #ECECEF; z-index: 0; }
+.sp-step:first-child::before { display: none; }
+.sp-step-n { width: 26px; height: 26px; border-radius: 50%; background: #ECECEF; color: #8E8E93;
+  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; z-index: 1; transition: all .2s; }
+.sp-step.active { color: #2F8F63; }
+.sp-step.active .sp-step-n { background: #86D1A8; color: #fff; box-shadow: 0 4px 10px rgba(134,209,168,.35); }
+.sp-step.done { color: #2F8F63; }
+.sp-step.done .sp-step-n { background: #2F8F63; color: #fff; }
+.sp-step.done::before { background: #2F8F63; }
+
+/* 玩家头像（取昵称首字） */
+.sp-ava { flex: none; width: 30px; height: 30px; border-radius: 50%;
+  background: linear-gradient(135deg, #86D1A8, #5FB98C); color: #fff; font-size: 14px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(134,209,168,.3); }
+.sp-p.me .sp-ava { background: linear-gradient(135deg, #5AA9F0, #3D8FD8); box-shadow: 0 2px 6px rgba(90,169,240,.35); }
+.sp-p.out .sp-ava { filter: grayscale(.7); opacity: .6; }
+.sp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 88px; }
+
+/* 发言中发光 */
+.sp-p.speaking { animation: spGlow 1.4s ease-in-out infinite; border-color: #86D1A8; }
+@keyframes spGlow { 0%,100% { box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 0 0 0 rgba(134,209,168,0); }
+  50% { box-shadow: 0 4px 14px rgba(134,209,168,.28), 0 0 0 4px rgba(134,209,168,.16); } }
+
+/* 投票计数徽标更明显 */
+.sp-vote { background: #FFE9E9; color: #E24B4A; padding: 2px 8px; border-radius: 999px; }
+
+/* 结算区揭晓动画 */
+.spy-result { animation: spResultIn .4s ease; }
+@keyframes spResultIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.sp-win { animation: spPop .45s cubic-bezier(.2,1.3,.5,1); }
+@keyframes spPop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
+
+/* 我的词条卡强化 */
+.spy-myword { position: relative; overflow: hidden; }
+.spy-myword::after { content: ''; position: absolute; top: -40%; right: -20%; width: 120px; height: 120px;
+  background: rgba(255,255,255,.18); border-radius: 50%; pointer-events: none; }
+
+/* D1 新手引导 */
+.tour-mask { position: fixed; inset: 0; background: rgba(28,28,30,.45); backdrop-filter: blur(4px);
+  z-index: 300; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.tour-mask.hidden { display: none; }
+.tour-card { background: #fff; border-radius: 22px; padding: 26px 24px; max-width: 420px; width: 100%;
+  box-shadow: 0 18px 50px rgba(0,0,0,.22); animation: tourIn .35s ease; }
+@keyframes tourIn { from { opacity: 0; transform: translateY(24px) scale(.96); } to { opacity: 1; transform: none; } }
+.tour-title { font-size: 19px; font-weight: 800; text-align: center; margin-bottom: 18px; color: #1C1C1E; }
+.tour-steps { display: flex; flex-direction: column; gap: 14px; margin-bottom: 20px; }
+.tour-step { display: flex; gap: 12px; align-items: flex-start; }
+.tour-ico { font-size: 24px; line-height: 1.3; flex: none; }
+.tour-step b { font-size: 14px; color: #1C1C1E; }
+.tour-step p { font-size: 12.5px; color: #8E8E93; margin: 3px 0 0; line-height: 1.5; }
+.tour-go { width: 100%; }
+
+/* D4 连续打卡 */
+#myStreak { color: #E8853B; }
+
+/* 暗黑模式适配（D块 + C块新组件） */
+body.dark .tour-card { background: #241d3a; }
+body.dark .tour-title, body.dark .tour-step b { color: #efe9fb; }
+body.dark .tour-step p { color: #b6a3d8; }
+body.dark .board-share, body.dark .dg-bank { background: #2a2240; border-color: #4a3a66; color: #cbbde8; }
+body.dark .board-share:hover, body.dark .dg-bank:hover { border-color: #86D1A8; color: #86D1A8; background: #2a2240; }
+body.dark .dg-bank.active { background: #244534; border-color: #3c8a63; color: #9fe8c4; }
+body.dark .sp-vote-btn.sp-abstain { background: #2a2240; color: #8d7cae; }
+
