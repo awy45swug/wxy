@@ -490,7 +490,12 @@ const server = http.createServer((req, res) => {
       return;
     }
     const ext = path.extname(filePath);
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    // 关键：sw.js / app.js / style.css / index.html 不允许浏览器启发式缓存，
+    // 否则改了前端代码后老用户的浏览器一直拿旧文件（尤其是 sw.js 有 24h 更新节流）。
+    const noCache = (ext === '.js' || ext === '.css' || ext === '.html');
+    const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
+    if (noCache) headers['Cache-Control'] = 'no-cache';
+    res.writeHead(200, headers);
     res.end(data);
   });
 });
