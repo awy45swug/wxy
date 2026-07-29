@@ -188,7 +188,10 @@ ws.onmessage = (e) => {
   } else if (msg.type === 'draw') {
     drawRemoteSegs(msg.segs);
   } else if (msg.type === 'drawClear') {
+    dgOps = [];
     drawClearCanvas();
+  } else if (msg.type === 'drawUndo') {
+    dgUndoLocal(msg.sid);
   } else if (msg.type === 'drawGuess') {
     if (msg.id !== myId) toast(`💬 ${msg.name} 猜：“${msg.text}”`);
     dgPushGuess(msg.id, msg.name, msg.text, false);
@@ -196,6 +199,8 @@ ws.onmessage = (e) => {
     onDrawSolved(msg);
   } else if (msg.type === 'drawSwap') {
     onDrawSwap(msg);
+  } else if (msg.type === 'spyState') {
+    applySpyState(msg);
   }
 };
 ws.onerror = () => { if (!wsConnected) enterLocalMode(); };
@@ -848,9 +853,14 @@ renderFortune(); // 启动即抽今日运势（待加入也会随 join 刷新）
  * 你画我猜（并入摸鱼网页，复用同一 WebSocket 房间，真·多人实时）
  * 画师看词作画，其他人猜词；笔画实时同步、晚进者可回放最近笔画
  * ========================================================= */
-let dgState = { word: null, cat: null, drawerId: null, round: 0, ops: [], wordLen: 0, swapsLeft: 0, guessLog: [], solved: false, solvedBy: null };
+let dgState = { word: null, cat: null, drawerId: null, round: 0, ops: [], wordLen: 0, swapsLeft: 0, guessLog: [], solved: false, solvedBy: null, settled: false, hint: null };
 let dgDrawing = false, dgLast = null, dgColor = '#1C1C1E', dgBrush = 6, dgErase = false;
 let dgReady = false; // 画布是否已初始化
+let dgOps = [];       // 本地笔迹栈（每笔含 sid，用于单步撤销 / 重绘）
+let dgStrokeId = 0;  // 当前笔画 id（每次落笔 +1）
+let dgJoined = false;// 是否已「参与游戏」（否则为围观，不能画/猜）
+let dgDeadline = 0;  // 本轮结束时间戳（ms），0 表示未计时
+let dgTimerInterval = null; // 倒计时刷新定时器
 const dgCanvas = () => $('dgBoard');
 
 // 高 DPI 画布初始化
@@ -887,7 +897,7 @@ function dgDrawSeg(seg) {
 }
 function drawRemoteSegs(segs) {
   if (!dgReady) return;
-  (segs || []).forEach(dgDrawSeg);
+  (segs || []).forEach(s => { dgOps.push(s); dgDrawSeg(s); });
 }
 function drawClearCanvas() {
   const cv = dgCanvas(); if (!cv || !cv._ctx) return;
@@ -896,20 +906,28 @@ function drawClearCanvas() {
 
 // 画师作画
 function dgStart(e) {
-  if (!dgAmDrawer()) return;
-  dgDrawing = true; dgLast = dgNorm(e); e.preventDefault();
+  if (!dgAmDrawer() || dgState.settled) return; // 本轮结束（超时）不可再画
+  dgDrawing = true; dgLast = dgNorm(e); dgStrokeId++; e.preventDefault();
 }
 function dgMove(e) {
-  if (!dgDrawing || !dgAmDrawer()) return;
+  if (!dgDrawing || !dgAmDrawer() || dgState.settled) return;
   const p = dgNorm(e);
   const seg = { x1: dgLast.nx, y1: dgLast.ny, x2: p.nx, y2: p.ny,
-    c: dgErase ? '#FCFCFD' : dgColor, w: dgErase ? dgBrush * 2.2 : dgBrush };
+    c: dgErase ? '#FCFCFD' : dgColor, w: dgErase ? dgBrush * 2.2 : dgBrush, sid: dgStrokeId };
   dgDrawSeg(seg);
-  // 实时发给其他人（归一化坐标）
+  dgOps.push(seg); // 本地留存，供撤销 / 重绘
+  // 实时发给其他人（归一化坐标）；服务端会排除本人回显，避免重绘
   send({ type: 'drawStroke', id: myId, segs: [seg] });
   dgLast = p; e.preventDefault();
 }
 function dgEnd() { dgDrawing = false; }
+
+// 单步撤销：移除最近一笔（同 sid 的所有段）并重绘
+function dgUndoLocal(sid) {
+  if (sid == null) dgOps = dgOps.slice(0, -1);
+  else dgOps = dgOps.filter(s => s.sid !== sid);
+  drawClearCanvas(); dgOps.forEach(dgDrawSeg);
+}
 
 function dgAmDrawer() { return dgState.drawerId && dgState.drawerId === myId; }
 function dgActive() { return !!dgState.drawerId; }
@@ -919,13 +937,18 @@ function applyDrawState(s) {
   dgState = {
     word: s.word, cat: s.cat, drawerId: s.drawerId, round: s.round || 0, ops: s.ops || [],
     wordLen: s.wordLen || 0, swapsLeft: s.swapsLeft || 0, guessLog: s.guessLog || [],
-    solved: !!s.solved, solvedBy: s.solvedBy || null
+    solved: !!s.solved, solvedBy: s.solvedBy || null,
+    settled: !!s.settled, hint: s.hint || null
   };
+  dgJoined = Array.isArray(s.players) && s.players.some(p => p.id === myId);
+  dgDeadline = s.deadline || 0;
   dgRender();
   // 回放最近笔画（清空后重画）
   drawClearCanvas();
-  (dgState.ops || []).forEach(dgDrawSeg);
+  dgOps = (s.ops || []).slice();
+  dgOps.forEach(dgDrawSeg);
   dgRenderGuessLog();
+  startDgCountdown();
 }
 function dgRender() {
   const round = $('dgRound'); if (round) round.textContent = dgState.round || 1;
@@ -944,13 +967,17 @@ function dgRender() {
   if (!dgActive()) {
     if (wordEl) { wordEl.textContent = '点下方按钮开局'; wordEl.classList.remove('hide'); }
     if (wordLenEl) wordLenEl.textContent = '';
-    if (startBtn) startBtn.classList.remove('hidden');
+    if (startBtn) {
+      startBtn.classList.remove('hidden');
+      if (!dgJoined) { startBtn.classList.add('disabled'); startBtn.textContent = '👀 围观中（先参与游戏）'; }
+      else { startBtn.classList.remove('disabled'); startBtn.textContent = '🙋 我要当画师'; }
+    }
     if (nextBtn) nextBtn.classList.add('hidden');
     if (swapBtn) swapBtn.classList.add('hidden');
     if (tools) tools.classList.add('dim');
-    if (guessInput) { guessInput.disabled = true; guessInput.placeholder = '还没开局呢～'; }
+    if (guessInput) { guessInput.disabled = true; guessInput.placeholder = dgJoined ? '还没开局呢～' : '围观中，参与游戏后才能猜词'; }
     if (guessSend) guessSend.disabled = true;
-    if (hint) hint.textContent = '点「开始游戏」当画师，开局后其他人来猜 🎨';
+    if (hint) hint.textContent = dgJoined ? '点「我要当画师」开局，你来画大家猜 🎨' : '当前是围观模式，点「参与游戏」加入本局 👀';
   } else if (dgAmDrawer()) {
     if (wordEl) { wordEl.textContent = dgState.word || '—'; wordEl.classList.remove('hide'); }
     if (wordLenEl) wordLenEl.textContent = lenTxt;
@@ -980,7 +1007,24 @@ function dgRender() {
       if (wordEl) { wordEl.textContent = dgState.wordLen ? Array(dgState.wordLen).fill('＿').join(' ') : '？ ？ ？'; wordEl.classList.add('hide'); }
     }
     if (wordLenEl) wordLenEl.textContent = lenTxt;
-    if (startBtn) startBtn.classList.add('hidden');
+    // 非画师分支：按「座位状态」决定"我要当画师"是否可点
+    const drawerName = (serverState.users.find(u => u.id === dgState.drawerId) || {}).nickname || '画师';
+    if (startBtn) {
+      startBtn.classList.remove('hidden');
+      if (!dgJoined) {
+        // 围观用户：不能接棒当画师
+        startBtn.classList.add('disabled');
+        startBtn.textContent = '👀 围观中（先参与游戏）';
+      } else if (dgState.solved) {
+        // 本轮已揭晓，座位开放 → 可接棒当画师
+        startBtn.classList.remove('disabled');
+        startBtn.textContent = '🙋 我要当画师（接棒）';
+      } else {
+        // 有画师在作画 → 不能抢，显示画师名并禁用
+        startBtn.classList.add('disabled');
+        startBtn.textContent = `🙋 画师：${drawerName}（等ta画完）`;
+      }
+    }
     if (nextBtn) {
       nextBtn.classList.remove('hidden');
       // 画师本人，或特权昵称（羡温言/LL/水果刀/慢慢）可点「下一轮」
@@ -996,17 +1040,81 @@ function dgRender() {
     if (swapBtn) swapBtn.classList.add('hidden');
     if (tools) tools.classList.add('dim');
     if (guessInput) {
-      guessInput.disabled = false;
-      guessInput.placeholder = dgState.solved
-        ? `答案已揭晓：${dgState.word}（继续猜不计分）`
-        : `看画猜词（${dgState.wordLen || '?'}个字），输入后点猜…`;
+      if (!dgJoined) {
+        guessInput.disabled = true;
+        guessInput.placeholder = '围观中，参与游戏后才能猜词 👀';
+      } else {
+        guessInput.disabled = !!dgState.settled && !dgState.solved;
+        guessInput.placeholder = dgState.settled
+          ? `⏰ 时间到！答案：${dgState.word}，等下一轮`
+          : (dgState.solved
+            ? `答案已揭晓：${dgState.word}（继续猜不计分）`
+            : `看画猜词（${dgState.wordLen || '?'}个字），输入后点猜…`);
+      }
     }
-    if (guessSend) guessSend.disabled = false;
-    if (hint) hint.textContent = dgState.solved
-      ? `本轮答案：「${dgState.word}」，等画师点「下一轮」继续 🎨`
-      : `画师正在作画，猜对了积分 +10 🔍（共 ${dgState.wordLen || '?'} 个字）`;
+    if (guessSend) guessSend.disabled = !dgJoined;
+    if (hint) hint.textContent = dgState.settled
+      ? `⏰ 时间到！本轮答案：「${dgState.word}」，点「下一轮」继续 🎨`
+      : (dgState.solved
+        ? `本轮答案：「${dgState.word}」，等画师点「下一轮」继续 🎨`
+        : `画师正在作画，猜对了积分 +10 🔍（共 ${dgState.wordLen || '?'} 个字）`);
   }
+  dgRenderJoinBtn();
+  dgRenderTimer();
   dgRenderScore();
+}
+
+// 「参与游戏 / 退出围观」按钮 + 围观横幅 + 撤销按钮显隐
+function dgRenderJoinBtn() {
+  const btn = $('dgJoinBtn');
+  if (btn) {
+    if (dgJoined) { btn.textContent = '🚪 退出游戏（转围观）'; btn.classList.add('joined'); }
+    else { btn.textContent = '🙌 参与游戏'; btn.classList.remove('joined'); }
+  }
+  const banner = $('dgSpecBanner');
+  if (banner) banner.classList.toggle('hidden', dgJoined);
+  const undoBtn = $('dgUndo');
+  if (undoBtn) undoBtn.classList.toggle('hidden', !dgAmDrawer());
+}
+
+// 顶部倒计时 + 150 秒首字拼音提示
+function dgRenderTimer() {
+  const el = $('dgTimer');
+  if (el) {
+    if (!dgActive() || !dgDeadline || dgState.settled || dgState.solved) {
+      if (dgActive() && (dgState.settled || dgState.solved)) {
+        el.classList.remove('hidden', 'warn');
+        el.textContent = '⏰ 本轮结束';
+      } else {
+        el.classList.add('hidden');
+      }
+    } else {
+      const left = Math.max(0, Math.ceil((dgDeadline - Date.now()) / 1000));
+      const m = Math.floor(left / 60), s = left % 60;
+      el.classList.remove('hidden');
+      el.textContent = `⏱ ${m}:${String(s).padStart(2, '0')}`;
+      el.classList.toggle('warn', left <= 30);
+    }
+  }
+  // 拼音提示（150 秒时后端下发；画师和已揭晓不显示）
+  const py = $('dgPinyin');
+  if (py) {
+    if (dgState.hint && !dgState.solved && !dgState.settled && !dgAmDrawer()) {
+      py.classList.remove('hidden');
+      py.textContent = dgState.hint.pinyin
+        ? `💡 提示：第一个字拼音「${dgState.hint.pinyin}」`
+        : `💡 提示：第一个字是「${dgState.hint.char}」`;
+    } else {
+      py.classList.add('hidden');
+    }
+  }
+}
+function startDgCountdown() {
+  if (dgTimerInterval) { clearInterval(dgTimerInterval); dgTimerInterval = null; }
+  dgRenderTimer();
+  if (dgActive() && dgDeadline > 0 && !dgState.settled && !dgState.solved) {
+    dgTimerInterval = setInterval(dgRenderTimer, 500);
+  }
 }
 function dgRenderScore() {
   const list = $('dgScoreList'); if (!list) return;
@@ -1032,6 +1140,7 @@ function onDrawSolved(msg) {
     toast(`🎨 ${msg.solvedName} 猜对了「${msg.word}」+10${drawerGets ? '，画师 +5' : ''}`);
   }
   dgRender();
+  startDgCountdown(); // 已揭晓：停掉倒计时刷新
 }
 function dgPop(big, tx) {
   let p = $('dgPopEl');
@@ -1087,16 +1196,41 @@ function openDrawGame() {
   }
   if (!myNick) { toast('先加入摸鱼场才能玩你画我猜哦'); showModal(); return; }
   $('drawGame').classList.remove('hidden');
+  // 进入「你画我猜」页面：登记在场，之后才能认领画师 / 保持画师身份
+  if (ws && ws.readyState === 1) send({ type: 'drawEnter', id: myId });
   // 画布需在可见后才能取到尺寸
   setTimeout(() => { dgSetupCanvas(); drawClearCanvas(); (dgState.ops || []).forEach(dgDrawSeg); dgRender(); dgRenderGuessLog(); }, 30);
 }
-function closeDrawGame() { $('drawGame').classList.add('hidden'); }
+function closeDrawGame() {
+  $('drawGame').classList.add('hidden');
+  // 离开「你画我猜」页面：退出在场（若自己是画师则释放座位，由服务端处理）
+  if (ws && ws.readyState === 1) send({ type: 'drawLeave', id: myId });
+}
 
 $('openDraw').onclick = openDrawGame;
 $('drawClose').onclick = closeDrawGame;
+$('dgJoinBtn').onclick = () => {
+  if (dgJoined) {
+    send({ type: 'drawQuit', id: myId });
+    toast('已退出本局，转为围观 👀');
+  } else {
+    send({ type: 'drawJoin', id: myId });
+    toast('🙌 已参与游戏，可以画画 / 猜词啦');
+  }
+};
+$('dgUndo').onclick = () => {
+  if (!dgAmDrawer()) { toast('只有画师能撤销 🤫'); return; }
+  if (dgState.settled) { toast('本轮已结束，不能再画了'); return; }
+  send({ type: 'drawUndo', id: myId });
+};
 $('dgStartBtn').onclick = () => {
-  // 无有效画师时任何人可开局；已有画师则只有画师本人能"再来一局"
-  if (dgActive() && !dgAmDrawer()) { toast('已有画师在位，等 TA 点「下一轮」哦 🤫'); return; }
+  // 「我要当画师」：先参与游戏，再发后端判定座位是否开放
+  if (!dgJoined) { toast('先点「参与游戏」加入本局，才能当画师 👀'); return; }
+  if (dgActive() && !dgAmDrawer() && !dgState.solved) {
+    const drawerName = (serverState.users.find(u => u.id === dgState.drawerId) || {}).nickname || '画师';
+    toast(`画师是 ${drawerName}，等 TA 画完这轮，或揭晓后你再接棒 🤫`);
+    return;
+  }
   send({ type: 'drawStart', id: myId });
 };
 $('dgNextBtn').onclick = () => {
@@ -1111,13 +1245,223 @@ $('dgSwap').onclick = () => {
   send({ type: 'drawSwap', id: myId });
 };
 
+// ===================== 谁是卧底 =====================
+let spyState = { phase: 'lobby', players: [], bank: 'career', anonymous: false, min: 3, max: 8 };
+let spyPrevPhase = 'lobby';
+function spyEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function getSpyScore() { return parseInt(localStorage.getItem('moyu_spy_score_' + myNick) || '0', 10) || 0; }
+function addSpyScore(n) { const s = getSpyScore() + n; localStorage.setItem('moyu_spy_score_' + myNick, String(s)); return s; }
+
+function openSpy() {
+  if (mode !== 'online' || !wsConnected) { toast('🕵️ 谁是卧底需要联网房间，当前未连接后端～'); return; }
+  if (!myNick) { toast('先加入摸鱼场才能玩谁是卧底哦'); showModal(); return; }
+  $('spyGame').classList.remove('hidden');
+  // 围观者进入面板即可看到大厅；只有点「参与游戏」才正式加入本局
+  setTimeout(() => spyRender(), 30);
+}
+function closeSpy() { $('spyGame').classList.add('hidden'); }
+
+function applySpyState(msg) {
+  spyState = msg;
+  // 结算瞬间结算本地积分（仅参与者、每人只加一次）
+  if (spyPrevPhase !== 'over' && spyState.phase === 'over' && spyState.result) {
+    const mine = spyState.result.words[myId];
+    if (mine) {
+      let add = 0;
+      if (spyState.result.winner === 'civ' && mine.role === 'civ') add = 10;
+      else if (spyState.result.winner === 'spy' && mine.role === 'spy') add = 15;
+      if (add) { const total = addSpyScore(add); toast(`🏆 你 +${add} 分！卧底积分累计 ${total}`); }
+    }
+  }
+  spyPrevPhase = spyState.phase;
+  spyRender();
+}
+
+function spyIsPlayer() { return (spyState.players || []).some(p => p.id === myId); }
+function spyCurSpeakerId() {
+  if (spyState.phase !== 'speak') return null;
+  return spyState.order[spyState.speakIdx];
+}
+
+function spyRender() {
+  const s = spyState;
+  const inLobby = s.phase === 'lobby';
+  const inOver = s.phase === 'over';
+  const playing = s.phase === 'speak' || s.phase === 'vote';
+  const host = DRAW_NEXT_ALLOW.includes(myNick);
+
+  // 我的积分
+  $('spyMyScore').textContent = '积分 ' + getSpyScore();
+
+  // 顶部词库 / 匿名开关（仅大厅可改）
+  document.querySelectorAll('.spy-bank').forEach(b => {
+    b.classList.toggle('active', b.dataset.bank === s.bank);
+    b.disabled = !inLobby;
+  });
+  const anon = $('spyAnon');
+  anon.checked = !!s.anonymous;
+  anon.disabled = !inLobby;
+  $('spyTopCtrl').classList.toggle('locked', !inLobby);
+
+  // 我的词条（游戏中且我是参与者才可见；不揭示身份）
+  const myWordEl = $('spyMyWord');
+  if (playing && s.me && s.me.word) {
+    myWordEl.classList.remove('hidden');
+    myWordEl.innerHTML = `<div class="sp-w-lbl">你的词条</div><div class="sp-w-word">${spyEsc(s.me.word)}</div><div class="sp-w-tip">别直接说出这个词，描述给其他人听～</div>`;
+  } else {
+    myWordEl.classList.add('hidden');
+  }
+
+  // 玩家列表
+  const playersEl = $('spyPlayers');
+  const curId = spyCurSpeakerId();
+  if (!s.players || !s.players.length) {
+    playersEl.innerHTML = '<div class="spy-empty">还没有人参与，点下方「参与游戏」加入本局</div>';
+  } else {
+    playersEl.innerHTML = s.players.map(p => {
+      const cls = ['sp-p'];
+      if (p.isMe) cls.push('me');
+      if (!p.alive) cls.push('out');
+      if (p.id === curId) cls.push('speaking');
+      const tag = p.id === s.hostId ? '<span class="sp-tag host">房主</span>' : '';
+      const meTag = p.isMe ? '<span class="sp-tag me">你</span>' : '';
+      const st = !p.alive ? '<span class="sp-tag out">出局</span>'
+        : (p.id === curId ? '<span class="sp-tag sp">发言中</span>'
+          : (s.phase === 'vote' && p.voted ? '<span class="sp-tag voted">已投</span>' : ''));
+      const voteCount = (s.tally && s.tally[p.id]) ? `<span class="sp-vote">${s.tally[p.id]}票</span>` : '';
+      return `<div class="${cls.join(' ')}"><span class="sp-name">${spyEsc(p.name)}</span>${meTag}${tag}${st}${voteCount}</div>`;
+    }).join('');
+  }
+  $('spyPlayerCount').textContent = (s.players || []).length;
+
+  // 围观人员（网页在线、但未点参与）
+  const specIds = new Set((s.players || []).map(p => p.id));
+  const specs = (serverState.users || []).filter(u => u.id && !specIds.has(u.id));
+  const specEl = $('spySpec');
+  if (!specs.length) specEl.innerHTML = '<span class="spy-empty">还没有人围观，叫上小伙伴一起玩～</span>';
+  else specEl.innerHTML = specs.map(u => `<span class="sp-spec">${spyEsc(u.nickname || '匿名')}</span>`).join('');
+
+  // 发言区
+  const speakArea = $('spySpeakArea');
+  const voteArea = $('spyVoteArea');
+  speakArea.classList.toggle('hidden', !playing && !inOver);
+  voteArea.classList.toggle('hidden', s.phase !== 'vote');
+
+  if (s.phase === 'speak') {
+    const cur = s.players.find(p => p.id === curId);
+    $('spyCur').innerHTML = cur ? `轮到 <b>${spyEsc(cur.name)}</b> 发言…` : '等待发言';
+    const imCur = curId === myId;
+    $('spySpeakInputWrap').classList.toggle('hidden', !imCur);
+    if (imCur) setTimeout(() => { const i = $('spySpeakInput'); if (i && document.activeElement !== i) i.focus(); }, 50);
+  } else if (s.phase === 'vote') {
+    $('spyCur').textContent = '';
+    $('spySpeakInputWrap').classList.add('hidden');
+  }
+  // 发言记录
+  $('spySpeeches').innerHTML = (s.speeches || []).map(sp =>
+    `<div class="sp-line"><span class="sp-line-name">${spyEsc(sp.name)}</span><span class="sp-line-text">${spyEsc(sp.text)}</span></div>`
+  ).join('') || '<div class="spy-empty">还没有人发言</div>';
+
+  // 投票区
+  if (s.phase === 'vote') {
+    const me = s.players.find(p => p.id === myId);
+    const iVoted = !!(me && me.voted);
+    const tip = $('spyVoteTip');
+    if (iVoted) tip.textContent = '你已投票，等待其他人…';
+    else if (me && me.alive) tip.textContent = '投票给你怀疑的卧底（不能投自己）';
+    else tip.textContent = '等待玩家投票…';
+    const candidates = s.players.filter(p => p.alive && p.id !== myId);
+    $('spyVoteList').innerHTML = candidates.map(p => {
+      const cnt = (s.tally && s.tally[p.id]) || 0;
+      const dis = iVoted ? 'disabled' : '';
+      return `<button class="sp-vote-btn" data-target="${p.id}" ${dis}>${spyEsc(p.name)} <span class="sp-vc">${cnt}</span></button>`;
+    }).join('') || '<div class="spy-empty">没有可投的人</div>';
+    document.querySelectorAll('.sp-vote-btn').forEach(b => {
+      b.onclick = () => { send({ type: 'spyVote', id: myId, target: b.dataset.target }); };
+    });
+  }
+
+  // 结算区
+  const resultEl = $('spyResultArea');
+  if (s.phase === 'over' && s.result) {
+    resultEl.classList.remove('hidden');
+    const r = s.result;
+    const winTxt = r.winner === 'civ' ? '🎉 平民胜利！' : '🕵️ 卧底胜利！';
+    const underNames = r.undercovers.map(id => (r.words[id] && r.words[id].name) || '玩家').join('、');
+    const rows = Object.keys(r.words).map(id => {
+      const w = r.words[id];
+      const roleTag = w.role === 'spy' ? '<span class="sp-tag spy">卧底</span>' : '<span class="sp-tag civ">平民</span>';
+      const meTag = id === myId ? '<span class="sp-tag me">你</span>' : '';
+      return `<div class="sp-r-row"><span class="sp-name">${spyEsc(w.name)}</span>${meTag}${roleTag}<span class="sp-r-word">${spyEsc(w.word)}</span></div>`;
+    }).join('');
+    resultEl.innerHTML = `<div class="sp-win ${r.winner}">${winTxt}</div>
+      <div class="sp-unders">卧底是：<b>${spyEsc(underNames)}</b></div>
+      <div class="sp-r-title">本局词条</div>${rows}`;
+  } else {
+    resultEl.classList.add('hidden');
+  }
+
+  // 提示
+  const hint = $('spyHint');
+  if (inLobby) hint.textContent = host
+    ? `点「参与游戏」凑齐 ${s.min}~${s.max} 人，你（房主）即可开始`
+    : '等房主（羡温言/LL/水果刀/慢慢）凑齐 3~8 人开始游戏';
+  else if (playing) hint.textContent = '轮流描述自己的词，全部发言后投票揪出卧底';
+  else hint.textContent = '';
+
+  // 底部操作
+  const joinBtn = $('spyJoinBtn'), startBtn = $('spyStartBtn'), restartBtn = $('spyRestartBtn');
+  // 参与游戏
+  if (inLobby || inOver) {
+    joinBtn.classList.remove('hidden');
+    if (spyIsPlayer()) { joinBtn.textContent = '已参与 ✓'; joinBtn.disabled = true; }
+    else { joinBtn.textContent = '参与游戏'; joinBtn.disabled = false; }
+  } else { joinBtn.classList.add('hidden'); }
+  // 开始游戏（仅房主 + 大厅 + 人数达标）
+  if (inLobby && host) {
+    startBtn.classList.remove('hidden');
+    const ok = s.players.length >= s.min && s.players.length <= s.max;
+    startBtn.disabled = !ok;
+    startBtn.textContent = ok ? '开始游戏' : `需 ${s.min}~${s.max} 人（${s.players.length}）`;
+  } else {
+    startBtn.classList.add('hidden');
+  }
+  // 重新开局（所有人可见；游戏中置灰）
+  restartBtn.classList.remove('hidden');
+  restartBtn.disabled = playing;
+}
+
+// 事件绑定
+$('openSpy').onclick = openSpy;
+$('spyClose').onclick = closeSpy;
+$('spyJoinBtn').onclick = () => {
+  if (spyIsPlayer()) return;
+  send({ type: 'spyJoin', id: myId });
+};
+$('spyStartBtn').onclick = () => { send({ type: 'spyStart', id: myId }); };
+$('spyRestartBtn').onclick = () => { send({ type: 'spyRestart', id: myId }); };
+$('spyAnon').onchange = (e) => { send({ type: 'spySetAnon', id: myId, anonymous: e.target.checked }); };
+document.querySelectorAll('.spy-bank').forEach(b => {
+  b.onclick = () => { send({ type: 'spySetBank', id: myId, bank: b.dataset.bank }); };
+});
+$('spySpeakSend').onclick = () => {
+  const inp = $('spySpeakInput');
+  const text = inp.value.trim();
+  if (!text) return;
+  send({ type: 'spySpeak', id: myId, text });
+  inp.value = '';
+};
+$('spySpeakInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('spySpeakSend').click(); } });
+
 // 猜词
 function dgSendGuess() {
   const inp = $('dgGuessInput');
   const text = inp.value.trim();
   if (!text) return;
+  if (!dgJoined) { toast('围观中～点「参与游戏」加入后才能猜词 👀'); return; }
   if (dgAmDrawer()) { toast('你是画师，不能猜自己的词 🤫'); return; }
   if (!dgActive()) { toast('还没开局，点「开始游戏」先'); return; }
+  if (dgState.settled && !dgState.solved) { toast('⏰ 本轮已结束，等下一轮吧'); return; }
   send({ type: 'drawGuess', id: myId, text });
   inp.value = '';
 }
@@ -1148,6 +1492,9 @@ $('dgBrush').oninput = e => dgBrush = +e.target.value;
   cv.addEventListener('touchstart', dgStart, { passive: false });
   cv.addEventListener('touchmove', dgMove, { passive: false });
   cv.addEventListener('touchend', dgEnd);
+  cv.addEventListener('touchcancel', dgEnd);
+  // 绘画过程中禁止页面滚动/缩放（配合 CSS touch-action:none 双保险）
+  cv.style.touchAction = 'none';
 })();
 
 // 窗口变化时重设画布并回放
