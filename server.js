@@ -1052,8 +1052,11 @@ wss.on('connection', (ws) => {
       saveState();
       broadcastSpy();
     } else if (msg.type === 'spyRestart') {
-      // 所有人可见：重置回大厅（保留参与者、词库、匿名设置，方便直接再来一局）
+      // 仅房主（特权昵称）可重新开局；重置回大厅，保留参与者/词库/匿名/房主身份
+      const u = state.users[id];
+      if (!u) return;
       const s = state.spy;
+      if (!SPY_HOST_ALLOW.includes(u.nickname)) return; // 非房主不可重开
       s.phase = 'lobby';
       s.words = {};
       s.order = [];
@@ -1062,7 +1065,7 @@ wss.on('connection', (ws) => {
       s.votes = {};
       s.round = 0;
       s.result = null;
-      s.hostId = null;
+      // 保留 hostId：房主身份延续，方便继续主持下一局
       saveState();
       broadcastSpy();
     }
