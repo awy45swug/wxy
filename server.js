@@ -68,17 +68,31 @@ function nextDrawer(currentId) {
   return ids[(i + 1) % ids.length];
 }
 // 推送当前画猜局状态（含最近笔画，供晚进的人回放）
-function broadcastDraw() {
+// 注意：词（word）只发给画师本人，其他人只拿到字数（wordLen），防止偷看
+function drawStateForClient(id) {
   const g = state.game || {};
-  const payload = JSON.stringify({
+  const amDrawer = !!(g.drawerId && g.drawerId === id);
+  // 词：画师本人可见；本轮已揭晓（有人猜中）则全员可见，防止偷看
+  const reveal = amDrawer || !!g.solved;
+  return {
     type: 'drawState',
-    word: g.word || null,
+    word: reveal ? (g.word || null) : null,
+    wordLen: g.word ? [...String(g.word)].length : 0,
     cat: g.cat || null,
     drawerId: g.drawerId || null,
     round: g.round || 0,
-    ops: g.ops || []
-  });
-  for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
+    ops: g.ops || [],
+    swapsLeft: amDrawer ? (g.swapsLeft || 0) : 0,
+    guessLog: g.guessLog || [],
+    solved: !!g.solved,
+    solvedBy: g.solvedBy || null
+  };
+}
+function broadcastDraw() {
+  for (const c of wss.clients) {
+    if (c.readyState !== 1) continue;
+    c.send(JSON.stringify(drawStateForClient(c.userId)));
+  }
 }
 
 function fmtDur(sec) {
@@ -90,7 +104,7 @@ function fmtDur(sec) {
 }
 
 // 共享状态：users 以 id 为 key，chats 为聊天记录（保留最近 50 条），xhs 为小红书热榜缓存
-let state = { day: todayStr(), week: weekStr(), month: monthStr(), users: {}, chats: [], xhs: { updated: 0, items: [] }, game: { word: null, cat: null, drawerId: null, round: 0, ops: [] } };
+let state = { day: todayStr(), week: weekStr(), month: monthStr(), users: {}, chats: [], xhs: { updated: 0, items: [] }, game: { word: null, cat: null, drawerId: null, round: 0, ops: [], wordLen: 0, swapsLeft: 0, guessLog: [], solved: false, solvedBy: null } };
 
 function loadState() {
   try {
@@ -107,7 +121,7 @@ function loadState() {
   if (!state.users) state.users = {};
   if (!Array.isArray(state.chats)) state.chats = [];
   if (!state.xhs || !Array.isArray(state.xhs.items)) state.xhs = { updated: 0, items: [] };
-  if (!state.game || typeof state.game !== 'object') state.game = { word: null, cat: null, drawerId: null, round: 0, ops: [] };
+  if (!state.game || typeof state.game !== 'object') state.game = { word: null, cat: null, drawerId: null, round: 0, ops: [], wordLen: 0, swapsLeft: 0, guessLog: [], solved: false, solvedBy: null };
 }
 loadState();
 
@@ -298,7 +312,37 @@ const server = http.createServer((req, res) => {
 // ---------- WebSocket ----------
 const wss = new WebSocketServer({ server });
 
+// 暂停某用户计时（落账 pending + 关闭 running），供 pause 按钮和连接断开兜底共用
+function pauseUser(id) {
+  const u = state.users[id];
+  if (!u || !u.running) return;
+  u.pending = (u.pending || 0) + (now() - u.runStart) / 1000;
+  u.running = false;
+  u.runStart = null;
+  saveState();
+  broadcast();
+}
+
 wss.on('connection', (ws) => {
+  // 连接断开：若该用户无其他活跃连接，自动暂停计时（退出网页兜底）
+  ws.on('close', () => {
+    const uid = ws.userId;
+    if (!uid) return;
+    let stillOnline = false;
+    for (const c of wss.clients) {
+      if (c !== ws && c.readyState === 1 && c.userId === uid) { stillOnline = true; break; }
+    }
+    if (!stillOnline) {
+      pauseUser(uid);
+      // 画师掉线：自动轮转给下一位，避免游戏卡死（下一轮仍只能由新画师点）
+      if (state.game && state.game.drawerId === uid) {
+        state.game.drawerId = nextDrawer(uid);
+        saveState();
+        broadcastDraw();
+      }
+    }
+  });
+
   // 新连接先发一份当前榜单（含服务端时间，用于客户端校正时钟漂移）+ 最近聊天记录
   ws.send(JSON.stringify({
     type: 'state',
@@ -310,14 +354,7 @@ wss.on('connection', (ws) => {
 
   // 若当前已有画猜局，把局状态（含最近笔画）单独发给新连接，方便晚进的人回放
   if (state.game && state.game.drawerId) {
-    ws.send(JSON.stringify({
-      type: 'drawState',
-      word: state.game.word || null,
-      cat: state.game.cat || null,
-      drawerId: state.game.drawerId || null,
-      round: state.game.round || 0,
-      ops: state.game.ops || []
-    }));
+    ws.send(JSON.stringify(drawStateForClient(ws.userId)));
   }
 
   ws.on('message', (buf) => {
@@ -346,6 +383,7 @@ wss.on('connection', (ws) => {
         u.lastActive = now();
       }
       saveState();
+      ws.userId = id; // 绑定连接与用户，供 close 时自动暂停
       broadcast();
     } else if (msg.type === 'start') {
       const u = state.users[id];
@@ -357,13 +395,7 @@ wss.on('connection', (ws) => {
         broadcast();
       }
     } else if (msg.type === 'pause') {
-      const u = state.users[id];
-      if (!u || !u.running) return;
-      u.pending = (u.pending || 0) + (now() - u.runStart) / 1000;
-      u.running = false;
-      u.runStart = null;
-      saveState();
-      broadcast();
+      pauseUser(id);
     } else if (msg.type === 'stop') {
       const u = state.users[id];
       if (!u) return;
@@ -445,6 +477,10 @@ wss.on('connection', (ws) => {
       u.totalBase = (u.totalBase || 0) + amt;
       t.todayBase = (t.todayBase || 0) - tamt;
       u.todayBase = (u.todayBase || 0) + tamt;
+      t.weekBase = (t.weekBase || 0) - tamt;
+      u.weekBase = (u.weekBase || 0) + tamt;
+      t.monthBase = (t.monthBase || 0) - tamt;
+      u.monthBase = (u.monthBase || 0) + tamt;
       t.stolen = (t.stolen || 0) + 1;
       u.stealCount = (u.stealCount || 0) + 1;
       u.lastSteal = nowTs;
@@ -472,17 +508,40 @@ wss.on('connection', (ws) => {
       const mp = JSON.stringify({ type: 'merit', id: u.id, merit: u.merit });
       for (const c of wss.clients) if (c.readyState === 1) c.send(mp);
     } else if (msg.type === 'drawStart') {
-      // 开一局：发起者当画师，服务端随机抽词
+      // 开一局：发起者当画师，服务端随机抽词。
+      // 若已有人当画师（且仍在线），只有画师本人能"再来一局"；画师已离线则视为无效，任何人可重开。
       const u = state.users[id];
       if (!u) return;
+      const g = state.game;
+      const drawerOnline = g && g.drawerId && state.users[g.drawerId] &&
+        [...wss.clients].some(c => c.readyState === 1 && c.userId === g.drawerId);
+      if (drawerOnline && g.drawerId !== id) return;
       const w = pickWord();
       state.game.word = w.word;
       state.game.cat = w.cat;
+      state.game.wordLen = [...String(w.word)].length;
       state.game.drawerId = id;
       state.game.round = (state.game.round || 0) + 1;
       state.game.ops = [];
+      state.game.swapsLeft = 2;   // 画师最多换词 2 次
+      state.game.solved = false; state.game.solvedBy = null;
+      state.game.guessLog = [];   // 新开一局重置猜词记录
       saveState();
       broadcastDraw();
+    } else if (msg.type === 'drawSwap') {
+      // 画师换词：最多 2 次；猜词记录（聊天框）保留，不清空
+      const g = state.game;
+      if (!g || !g.drawerId || g.drawerId !== id) return; // 仅画师可换
+      if ((g.swapsLeft || 0) <= 0) return;               // 次数已用完
+      const w = pickWord();
+      g.word = w.word; g.cat = w.cat;
+      g.wordLen = [...String(w.word)].length;
+      g.swapsLeft = (g.swapsLeft || 0) - 1;
+      saveState();
+      broadcastDraw();
+      const dname = (state.users[id] && state.users[id].nickname) || '匿名咸鱼';
+      const sp = JSON.stringify({ type: 'drawSwap', drawerId: id, name: dname, left: g.swapsLeft });
+      for (const c of wss.clients) if (c.readyState === 1) c.send(sp);
     } else if (msg.type === 'drawStroke') {
       // 画师作画：仅画师可发，实时转发给他人，并留存最近笔画供回放
       const g = state.game;
@@ -501,7 +560,7 @@ wss.on('connection', (ws) => {
       const payload = JSON.stringify({ type: 'drawClear' });
       for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
     } else if (msg.type === 'drawGuess') {
-      // 猜词：非画师才能猜，猜中 +10 并自动进入下一轮
+      // 猜词：非画师才能猜。首个猜中 +10 分、画师 +5 分并揭晓答案；后续猜中不计分
       const g = state.game;
       if (!g || !g.drawerId) return;
       if (id === g.drawerId) return;
@@ -512,44 +571,55 @@ wss.on('connection', (ws) => {
       const ans = String(g.word || '').trim().toLowerCase().replace(/\s+/g, '');
       const guess = text.toLowerCase().replace(/\s+/g, '');
       if (ans && guess === ans) {
-        const oldWord = g.word; // 刚被猜中的词（可公开），新一轮的词不能泄露给猜词者
-        u.drawScore = (u.drawScore || 0) + 10;
-        saveState();
         const name = u.nickname || '匿名咸鱼';
-        const sys = {
-          id: crypto.randomUUID ? crypto.randomUUID() : 'c' + now() + Math.random().toString(36).slice(2),
-          uid: 'system', nick: '🎨 你画我猜', avatar: '🎨',
-          text: `${name} 猜对了「${oldWord}」！摸鱼积分 +10 🎉`,
-          ts: now()
-        };
-        state.chats.push(sys);
-        if (state.chats.length > 50) state.chats = state.chats.slice(-50);
-        broadcastChat(sys);
-        // 自动进入下一轮（换词 + 轮转画师：从当前画师的下一位开始，保证人人都能画）
-        const w = pickWord();
-        g.word = w.word; g.cat = w.cat;
-        g.drawerId = nextDrawer(g.drawerId);
-        g.round = (g.round || 0) + 1;
-        g.ops = [];
-        saveState();
-        broadcastDraw();
-        const cp = JSON.stringify({ type: 'drawCorrect', id, name, word: oldWord });
-        for (const c of wss.clients) if (c.readyState === 1) c.send(cp);
-        broadcast();
+        if (!g.solved) {
+          // 首个猜中：计分 + 标记已解 + 揭晓答案（不再自动轮转，等画师点「下一轮」）
+          u.drawScore = (u.drawScore || 0) + 10;                 // 猜中者 +10
+          const drawer = state.users[g.drawerId];
+          if (drawer && drawer.id !== id) drawer.drawScore = (drawer.drawScore || 0) + 5; // 画师 +5
+          g.solved = true; g.solvedBy = id;
+          g.guessLog = (g.guessLog || []).concat([{ id, name, text: g.word, ok: true }]).slice(-30);
+          saveState();
+          const sys = {
+            id: crypto.randomUUID ? crypto.randomUUID() : 'c' + now() + Math.random().toString(36).slice(2),
+            uid: 'system', nick: '🎨 你画我猜', avatar: '🎨',
+            text: `✅ ${name} 猜对了「${g.word}」！+10 分，画师 +5 分 🎉`,
+            ts: now()
+          };
+          state.chats.push(sys);
+          if (state.chats.length > 50) state.chats = state.chats.slice(-50);
+          broadcastChat(sys);
+          const sp = JSON.stringify({ type: 'drawSolved', word: g.word, solvedBy: id, solvedName: name });
+          for (const c of wss.clients) if (c.readyState === 1) c.send(sp);
+          broadcast();
+        } else {
+          // 已揭晓：后续猜中不计分，仅进聊天记录（标记 dup，前端提示"已揭晓"）
+          g.guessLog = (g.guessLog || []).concat([{ id, name, text, ok: false, dup: true }]).slice(-30);
+          saveState();
+          const payload = JSON.stringify({ type: 'drawGuess', id, name, text });
+          for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
+        }
       } else {
         const name = u.nickname || '匿名咸鱼';
+        // 记录到猜词日志（供后来者/重连者回看）；不广播整局以省流量，仅实时下发 drawGuess 提示
+        g.guessLog = (g.guessLog || []).concat([{ id, name, text, ok: false }]).slice(-30);
+        saveState();
         const payload = JSON.stringify({ type: 'drawGuess', id, name, text });
         for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
       }
     } else if (msg.type === 'drawNext') {
-      // 下一轮：换词 + 轮转画师（任何人都能触发，便于画师离开后继续）
+      // 下一轮：仅画师可触发（换词 + 轮转画师）。重置本轮已解状态
       const g = state.game;
-      if (!g) return;
+      if (!g || !g.drawerId) return;
+      if (g.drawerId !== id) return; // 只有画师能进入下一轮
       const w = pickWord();
       g.word = w.word; g.cat = w.cat;
+      g.wordLen = [...String(w.word)].length;
       g.drawerId = nextDrawer(g.drawerId);
       g.round = (g.round || 0) + 1;
       g.ops = [];
+      g.swapsLeft = 2; // 新一轮新画师，重置换词次数
+      g.solved = false; g.solvedBy = null;
       saveState();
       broadcastDraw();
     }
