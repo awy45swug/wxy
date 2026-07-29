@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="28" fill="#86D1A8"/>
+  <g transform="translate(64 66)">
+    <ellipse cx="0" cy="0" rx="34" ry="22" fill="#FFFFFF"/>
+    <path d="M30 0 L52 -18 L46 0 L52 18 Z" fill="#FFFFFF"/>
+    <circle cx="-16" cy="-6" r="4.5" fill="#2E8B5F"/>
+    <path d="M-34 0 Q-24 10 -8 8" stroke="#BEE8D2" stroke-width="3" fill="none" stroke-linecap="round"/>
+  </g>
+  <text x="64" y="34" font-size="20" text-anchor="middle" fill="#FFFFFF" font-family="sans-serif" font-weight="bold">摸鱼</text>
+</svg>
