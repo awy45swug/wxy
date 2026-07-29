@@ -1568,8 +1568,17 @@ window.addEventListener('resize', () => {
 // ===================== D块：页面粘性 =====================
 
 // ---------- D2 PWA：注册 Service Worker ----------
+// 每次加载先清掉所有已注册的旧 sw 实例（避免老 sw.js 还活着、一直从旧缓存代理 fetch），
+// 再注册新的；配合 server 给 sw.js 返回的 no-cache，保证浏览器每次都拿到最新的 sw + 前端代码。
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    return Promise.all(regs.map((r) => r.unregister()));
+  }).then(() => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }).catch(() => {
+    // 极端情况下兜底，直接注册
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
 }
 
 // ---------- D5 手机返回键关闭游戏层 ----------
