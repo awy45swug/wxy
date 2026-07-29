@@ -111,6 +111,11 @@ let myId = localStorage.getItem('moyu_id') || null;
 let myNick = localStorage.getItem('moyu_nick') || '';
 let myAvatar = localStorage.getItem('moyu_avatar') || '🐟';
 
+// 进场禁用的匿名昵称
+const FORBIDDEN_NICKS = ['匿名闲鱼', '匿名咸鱼'];
+// 你画我猜：非画师但拥有「下一轮」按钮权限的特权昵称
+const DRAW_NEXT_ALLOW = ['羡温言', 'LL', '水果刀', '慢慢'];
+
 if (!myId) {
   myId = (crypto.randomUUID ? crypto.randomUUID() : 'u' + Math.random().toString(36).slice(2) + Date.now());
   localStorage.setItem('moyu_id', myId);
@@ -588,6 +593,7 @@ $('avatarUpload').onchange = (e) => {
 $('joinBtn').onclick = () => {
   const nick = $('nickInput').value.trim();
   if (!nick) { toast('🐟 取个名字才能进场哦（不能匿名）'); $('nickInput').focus(); return; }
+  if (FORBIDDEN_NICKS.includes(nick)) { toast('🐟 这个昵称不能用作匿名，换一个吧～'); $('nickInput').focus(); return; }
   myNick = nick;
   myAvatar = selectedAvatar;
   localStorage.setItem('moyu_nick', myNick);
@@ -977,8 +983,15 @@ function dgRender() {
     if (startBtn) startBtn.classList.add('hidden');
     if (nextBtn) {
       nextBtn.classList.remove('hidden');
-      nextBtn.classList.add('disabled');           // 只有画师能点「下一轮」
-      nextBtn.textContent = '下一轮（等画师）';
+      // 画师本人，或特权昵称（羡温言/LL/水果刀/慢慢）可点「下一轮」
+      const canAdvance = DRAW_NEXT_ALLOW.includes(myNick);
+      if (canAdvance) {
+        nextBtn.classList.remove('disabled');
+        nextBtn.textContent = '下一轮（你有权限）';
+      } else {
+        nextBtn.classList.add('disabled');
+        nextBtn.textContent = '下一轮（等画师）';
+      }
     }
     if (swapBtn) swapBtn.classList.add('hidden');
     if (tools) tools.classList.add('dim');
