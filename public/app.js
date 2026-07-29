@@ -138,11 +138,12 @@ function scheduleReconnect() {
 }
 function showConnBar() { const b = $('connBar'); if (b) b.classList.remove('hidden'); }
 function hideConnBar() { const b = $('connBar'); if (b) b.classList.add('hidden'); }
-function connect() {
-  ws = new WebSocket(`${wsProto}//${location.host}`);
-let clockOffset = 0; // serverNow - clientNow，用于校正时钟漂移
+let clockOffset = 0; // serverNow - clientNow，用于校正时钟漂移（必须全局，render/计时都依赖）
 let prevRank = {};
 let lastTotal = {}; // 记录上次展示的时长，用于触发数字 pop 动画
+
+function connect() {
+  ws = new WebSocket(`${wsProto}//${location.host}`);
 
   ws.onopen = () => {
     wsConnected = true;
