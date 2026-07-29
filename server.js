@@ -21,6 +21,11 @@ const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, 'public');
 const DATA_FILE = path.join(__dirname, 'data.json');
 
+// 你画我猜：即使不是当前画师，这些昵称也拥有「下一轮」按钮权限
+const DRAW_NEXT_ALLOW = ['羡温言', 'LL', '水果刀', '慢慢'];
+// 进场禁用的匿名昵称（防止"匿名闲鱼/匿名咸鱼"这类无意义名）
+const FORBIDDEN_NICKS = ['匿名闲鱼', '匿名咸鱼'];
+
 function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
@@ -61,11 +66,13 @@ function pickWord() {
 }
 // 下一轮画师：在现有用户里轮转
 function nextDrawer(currentId) {
-  const ids = Object.keys(state.users);
-  if (!ids.length) return currentId;
-  if (!currentId) return ids[0];
-  const i = ids.indexOf(currentId);
-  return ids[(i + 1) % ids.length];
+  // 只从「当前在线」的用户里轮转画师，保证新画师一定在线可画
+  const onlineIds = Object.keys(state.users).filter(uid =>
+    [...wss.clients].some(c => c.readyState === 1 && c.userId === uid));
+  if (!onlineIds.length) return currentId;
+  if (!currentId) return onlineIds[0];
+  const i = onlineIds.indexOf(currentId);
+  return onlineIds[(i + 1) % onlineIds.length];
 }
 // 推送当前画猜局状态（含最近笔画，供晚进的人回放）
 // 注意：词（word）只发给画师本人，其他人只拿到字数（wordLen），防止偷看
@@ -365,6 +372,10 @@ wss.on('connection', (ws) => {
     if (!id) return;
 
     if (msg.type === 'join') {
+      const rawNick = String(msg.nickname || '').trim();
+      const safeNick = (rawNick && !FORBIDDEN_NICKS.includes(rawNick))
+        ? rawNick
+        : ('摸鱼咸鱼' + Math.floor(Math.random() * 900 + 100));
       let u = state.users[id];
       if (!u) {
         u = {
@@ -372,13 +383,13 @@ wss.on('connection', (ws) => {
           totalBase: 0, todayBase: 0, weekBase: 0, monthBase: 0, pending: 0,
           running: false, runStart: null,           caught: 0, catchCount: 0, merit: 0,
           stolen: 0, stealCount: 0, lastSteal: 0, drawScore: 0,
-          nickname: msg.nickname || '匿名咸鱼',
+          nickname: safeNick,
           avatar: msg.avatar || '🐟',
           lastActive: now()
         };
         state.users[id] = u;
       } else {
-        if (msg.nickname) u.nickname = msg.nickname;
+        if (rawNick && !FORBIDDEN_NICKS.includes(rawNick)) u.nickname = rawNick;
         if (msg.avatar) u.avatar = msg.avatar;
         u.lastActive = now();
       }
@@ -608,10 +619,14 @@ wss.on('connection', (ws) => {
         for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
       }
     } else if (msg.type === 'drawNext') {
-      // 下一轮：仅画师可触发（换词 + 轮转画师）。重置本轮已解状态
+      // 下一轮：画师本人，或特权昵称（羡温言/LL/水果刀/慢慢）可触发；新画师从在线用户里轮转
       const g = state.game;
       if (!g || !g.drawerId) return;
-      if (g.drawerId !== id) return; // 只有画师能进入下一轮
+      const u = state.users[id];
+      if (!u) return;
+      const isDrawer = g.drawerId === id;
+      const isPriv = DRAW_NEXT_ALLOW.includes(u.nickname);
+      if (!isDrawer && !isPriv) return; // 既不是画师也不是特权昵称 → 忽略
       const w = pickWord();
       g.word = w.word; g.cat = w.cat;
       g.wordLen = [...String(w.word)].length;
