@@ -16,6 +16,14 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
+// 词库数据（你画我猜 WORD_BANK / 谁是卧底 SPY_BANKS）抽到独立模块，便于维护与去重
+const { WORD_BANK, CAT_LABEL, SPY_BANKS, SPY_BANK_LABEL } = require('./wordbank');
+
+// ===== 进程级异常兜底：避免任何未捕获异常 / 未处理 Promise 直接杀死整个服务 =====
+// 本服务常作为无 supervisor 的长驻进程运行，单点异常不应拖垮所有在线用户，
+// 因此统一捕获并记录日志，让进程继续存活（关键逻辑另有局部 try-catch 兜底）。
+process.on('uncaughtException', (e) => { console.error('[uncaughtException]', e && e.stack || e); });
+process.on('unhandledRejection', (e) => { console.error('[unhandledRejection]', e && e.stack || e); });
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, 'public');
@@ -29,11 +37,15 @@ const DATA_FILE = process.env.DATA_FILE ||
   (fs.existsSync(DATA_DIR_HINT) && fs.statSync(DATA_DIR_HINT).isDirectory()
     ? path.join(DATA_DIR_HINT, 'data.json')
     : path.join(__dirname, 'data.json'));
+// 写盘临时文件：先写 .tmp 再 rename 覆盖，保证 data.json 原子替换（中途崩溃可回退）
+const DATA_TMP = DATA_FILE + '.tmp';
 
 // 你画我猜：即使不是当前画师，这些昵称也拥有「下一轮」按钮权限
 const DRAW_NEXT_ALLOW = ['羡温言', 'LL', '水果刀', '慢慢'];
 // 进场禁用的匿名昵称（防止"匿名闲鱼/匿名咸鱼"这类无意义名）
 const FORBIDDEN_NICKS = ['匿名闲鱼', '匿名咸鱼'];
+const CHAT_KEEP = 200; // 聊天记录滚动上限（保留最近 N 条）
+const CHAT_CD = 1000, MERIT_CD = 150, CATCH_CD = 3000; // 操作冷却：发言 / 敲木鱼 / 抓鱼
 
 // 你画我猜：单局时长与首字拼音提示时机（毫秒）。
 // 可用环境变量 DRAW_TEST_FAST=1 加速自动化测试（2 秒一局 / 1 秒提示）。
@@ -45,34 +57,12 @@ const DRAW_PINYIN_MAP = require('./draw_pinyin_map');
 // 谁是卧底：拥有「开始游戏」权限的昵称（与画师下一轮白名单一致）
 const SPY_HOST_ALLOW = DRAW_NEXT_ALLOW;
 const SPY_MIN = 3, SPY_MAX = 8;
+// 发言阶段每位玩家的描述倒计时（毫秒），超时自动跳到下一位
+const SPY_SPEAK_MS = process.env.SPY_TEST_FAST ? 5000 : 30000;
+// 断线宽限：玩家掉线后保留游戏身份多久（毫秒），期间重连则恢复，超时则真正退出本局
+const SPY_RECONNECT_GRACE = process.env.SPY_TEST_FAST ? 4000 : 15000;
 // 双词库：每组含平民词 civ 与近似的卧底词 spy
-const SPY_BANKS = {
-  career: [
-    { civ: '加班', spy: '值班' }, { civ: '周报', spy: '月报' }, { civ: '摸鱼', spy: '划水' },
-    { civ: '开会', spy: '培训' }, { civ: '工资', spy: '奖金' }, { civ: '简历', spy: '名片' },
-    { civ: '同事', spy: '搭档' }, { civ: '出差', spy: '旅行' }, { civ: 'KPI', spy: 'OKR' },
-    { civ: '团建', spy: '聚餐' }, { civ: '报销', spy: '发票' }, { civ: '离职', spy: '请假' },
-    { civ: '面试', spy: '笔试' }, { civ: '工位', spy: '卡座' }, { civ: '调休', spy: '年假' },
-    { civ: '打卡', spy: '签到' }, { civ: '老板', spy: '领导' }, { civ: '加薪', spy: '升职' },
-    { civ: '裁员', spy: '辞退' }, { civ: '实习', spy: '试用' }, { civ: '食堂', spy: '外卖' },
-    { civ: '下午茶', spy: '夜宵' }, { civ: '会议室', spy: '办公室' }, { civ: '甲方', spy: '客户' },
-    { civ: '跳槽', spy: '转行' }, { civ: '年终奖', spy: '十三薪' }, { civ: '迟到', spy: '早退' },
-    { civ: '邮件', spy: '短信' }, { civ: '键盘', spy: '鼠标' }, { civ: '白板', spy: '黑板' }
-  ],
-  meme: [
-    { civ: '绝绝子', spy: 'yyds' }, { civ: '躺平', spy: '摆烂' }, { civ: 'emo', spy: '破防' },
-    { civ: '显眼包', spy: '社牛' }, { civ: '搭子', spy: '朋友' }, { civ: '雪糕刺客', spy: '价格刺客' },
-    { civ: '电子榨菜', spy: '下饭剧' }, { civ: '班味', spy: '人夫感' }, { civ: '听劝', spy: '劝分' },
-    { civ: 'CPU你', spy: 'PUA你' }, { civ: '硬控', spy: '控场' }, { civ: '冤种', spy: '铁憨憨' },
-    { civ: '上头', spy: '上瘾' }, { civ: 'i人', spy: 'e人' }, { civ: '尊嘟', spy: '假嘟' },
-    { civ: '吃瓜', spy: '围观' }, { civ: '网红', spy: '顶流' }, { civ: '点赞', spy: '转发' },
-    { civ: '弹幕', spy: '评论' }, { civ: '开黑', spy: '组队' }, { civ: '干饭', spy: '恰饭' },
-    { civ: '种草', spy: '安利' }, { civ: '拉黑', spy: '屏蔽' }, { civ: '刷屏', spy: '霸屏' },
-    { civ: '热搜', spy: '热榜' }, { civ: '直播', spy: '录播' }, { civ: '表情包', spy: '梗图' },
-    { civ: '剧透', spy: '爆料' }, { civ: '私聊', spy: '群聊' }, { civ: '社恐', spy: '内向' }
-  ]
-};
-const SPY_BANK_LABEL = { career: '职场词库', meme: '网络热梗词库' };
+
 // 根据参与者 id 生成稳定的随机代号（匿名模式用）
 function codeFor(id) {
   let h = 0;
@@ -120,46 +110,46 @@ const STEAL_CD = 5000;     // 同一人两次偷之间冷却 5 秒
 //   大众都认识、无负面低俗、非纯抽象概念。英文缩写仅保留 OKR/KPI；PPT/Excel 为产品名。
 //   已删除：纯情绪词(破防/绝绝子)、歧义词(糊/格局)、5字+、互联网黑话(赋能/闭环/抓手)、
 //   冷门梗(泰裤辣/尊嘟假嘟)、纯抽象(氛围感/仪式感)。
-const WORD_BANK = {
-  career: {
-    easy: ["周报","月报","年报","加班","KPI","OKR","团建","改需求","打卡","汇报","提案","实习","面试","升职","加薪","离职","入职","报销","请假","出差","培训","早会","例会","站会","周会","月会","季度会","总结会","启动会","评审会","庆功宴","散伙饭","头脑风暴","一对一","视频会","PPT","文档","表格","邮件","群聊","语音","钉钉","飞书","企微","腾讯会议","屏幕共享","云文档","知识库","键盘","鼠标","显示器","工牌","工位","会议室","白板","投影仪","打印机","咖啡机","饮水机","老板","同事","甲方","乙方","客户","需求","猎头","简历","合同","工资","年终奖","奖金","五险一金","公积金","社保","个税","绿植","升降桌","防窥膜","降噪耳机","下午茶","零食","发票","年假","报税","共享文档","在线表格","需求评审","Bug","测试","改bug","准点下班","咖啡杯","订书机","线上会议","需求变更","版本迭代","早八","日报","晨会","撤回键","表情包","需求池","排期表","居家办公","弹性打卡","名片","电梯","前台","食堂","外卖","便利贴","计算器","文件夹","保温杯","充电器","插线板","碎纸机","茶水间","午休","考勤","签到","加班费","工资条","请假条","辞职信","招聘","充电宝","双肩包"],
-    hard: ["摸鱼","画饼","甩锅","背锅","划水","救火","冲刺","跳槽","裁员","复盘","排期","绩效","发版","画大饼","背锅侠","摸鱼怪","划水王","画饼侠","甩锅侠","摸鱼学","准点跑路","假装忙","已读不回","消息红点","键盘侠","打工魂","带薪摸鱼","摸鱼搭子","工位摸鱼","带薪健身","工位养生","在线摸鱼","摸鱼神器","拍马屁","抱大腿","打小报告","穿小鞋","打鸡血","开小差","踢皮球","挖墙脚"]
-  },
-  meme: {
-    easy: ["雪王","蜜雪冰城","流量","热搜","顶流","网红","联名","周边","二创","鬼畜","名场面","高能","萌宠","手工","露营","飞盘","雪豹","遥遥领先","已读乱回","啊对对对","上分","电子榨菜","多巴胺","酱香拿铁","茅台","演唱会","音乐节","美拉德","暴风吸入","C位","本命","出道","成团","电子木鱼","路人粉","爆料","实锤","打工人","干饭人","尾款人","工具人","社畜","弹幕","点赞","转发","关注","粉丝","主播","直播","连麦","刷礼物","开黑","组队","五杀","吃鸡","上车","开麦","静音","头像","昵称","朋友圈","点外卖","抢红包","集五福","拼单","秒杀","锦鲤"],
-    hard: ["摆烂","躺平","内卷","班味","硬控","细思极恐","精神离职","职场演技","搬砖","韭菜","割韭菜","吃瓜","翻车","翻盘","逆袭","逆天","离谱","塌房","躺赢","带飞","躺枪","卷王","发疯","凡尔赛","阴阳怪气","智商税","打脸","蹭热度","出圈","种草","安利","上头","下头","真香","洗白","翻红","黑红","脱粉","爬墙","小丑","吃瓜群众","显眼包","冤种","集美","宝子","家人们","佛系","社恐","社牛","社死","爷青回","绿茶","海王","渣男","普信","油腻","修仙","治愈","解压","搭子","听劝"]
-  },
-  life: {
-    easy: ["奶茶","火锅","猫咪","可乐","雨伞","咖啡","啤酒","炸鸡","烧烤","串串","麻辣烫","螺蛳粉","煎饼","包子","饺子","面条","寿司","披萨","汉堡","薯条","蛋糕","面包","甜甜圈","冰淇淋","水果","苹果","香蕉","西瓜","草莓","葡萄","橙子","芒果","榴莲","桃子","樱桃","小狗","兔子","仓鼠","乌龟","金鱼","鹦鹉","多肉","鲜花","玫瑰","向日葵","书本","小说","漫画","电影","电视剧","综艺","游戏","钢琴","吉他","跑步","健身","瑜伽","游泳","篮球","足球","羽毛球","骑行","钓鱼","旅行","拍照","自拍","美甲","化妆","香水","口红","面膜","睡衣","枕头","被子","大床","沙发","抱枕","台灯","蜡烛","香薰","露营车","骑行服","钓鱼佬","猫罐头","狗狗","仓鼠球","盲盒","手办","汉服","洛丽塔","奶茶杯","瑞幸","蜜雪","麻辣香锅","烤冷面","煎饼果子","钵仔糕","麻薯","司康","可颂","巴斯克","猫窝","狗窝","猫爬架","逗猫棒","桨板","滑雪","冲浪","攀岩","密室逃脱","剧本杀","桌游","麻将","掼蛋","围炉煮茶","露营帐篷","天幕","野餐","滑板","陆冲","猫咖","狗咖","撸猫","撸狗","手作","陶艺","烘焙","咖啡拉花","精酿","微醺","露营椅","牙刷","牙膏","毛巾","拖鞋","眼镜","墨镜","帽子","围巾","手套","口罩","袜子","背包","钱包","钥匙","手表","耳机","相机","风扇","空调","冰箱","洗衣机","电饭煲","微波炉","热水壶","吹风机","镜子","梳子","剪刀","雨衣","风筝","气球","积木","拼图","秋千","滑梯","跳绳","呼啦圈","乒乓球","台球","保龄球","飞镖","唱歌","跳舞","画画","下棋","散步","爬山","放风筝","堆雪人","打雪仗","荡秋千","吹泡泡","捉迷藏","广场舞","太极拳","大熊猫","长颈鹿","大象","猴子","老虎","狮子","企鹅","海豚","刺猬","蜗牛","蝴蝶","蜜蜂","青蛙","螃蟹","龙虾","恐龙","月亮","星星","彩虹","闪电","雪花","日出","沙滩","温泉","地铁","高铁","飞机","轮船","热气球","摩天轮","过山车","旋转木马"],
-    hard: ["失眠","熬夜","赖床","打呼噜","梦游","减肥","撸铁","拉伸","冥想","发呆","宅家","断舍离","拔草","剁手","吃土","攒钱","月光族","夜猫子","路痴","选择困难","社交牛人","起床气"]
-  }
-};
-const CAT_LABEL = { career: '职场', meme: '网络热梗', life: '生活休闲' };
-// 防重复：记录已抽过的词，全库抽完一轮才重置（跨局持续，服务重启才清零）
-const usedWords = new Set();
-function pickWord() {
+
+// 防重复：记录已抽过的词，全库抽完一轮才重置（持久化到 data.json，重启也接着防）
+// preferCat 可选：指定只从该分类抽（你画我猜支持选词库分类）
+function pickWord(preferCat) {
   const cats = Object.keys(WORD_BANK);
   const totalCount = cats.reduce((n, c) => n + WORD_BANK[c].easy.length + WORD_BANK[c].hard.length, 0);
-  if (usedWords.size >= totalCount) usedWords.clear(); // 整库用完，重置一轮
-  // 随机选分类；若该分类词已抽光则换下一个分类
-  const catOrder = cats.slice().sort(() => Math.random() - 0.5);
-  for (const cat of catOrder) {
-    const bank = WORD_BANK[cat];
-    const easyLeft = bank.easy.filter(w => !usedWords.has(w));
-    const hardLeft = bank.hard.filter(w => !usedWords.has(w));
-    if (!easyLeft.length && !hardLeft.length) continue;
-    // 70% 抽简单、30% 抽困难（对应池抽光时回退另一池）
-    const useHard = (Math.random() < 0.3 && hardLeft.length > 0) || !easyLeft.length;
-    const arr = useHard ? hardLeft : easyLeft;
-    const word = arr[Math.floor(Math.random() * arr.length)];
-    usedWords.add(word);
-    return { word, cat: CAT_LABEL[cat] };
+  const used = state.usedWords || (state.usedWords = []);
+  if (used.length >= totalCount) {
+    // 整库用完，重置一轮；但保留刚用过的词，避免「重置瞬间立刻又抽到同一个」
+    const lastW = used[used.length - 1];
+    used.length = 0;
+    if (lastW) used.push(lastW);
   }
-  // 理论到不了这里（size 判断已兜底），保险回退
-  usedWords.clear();
+  const tryPick = (catList) => {
+    const catOrder = catList.slice().sort(() => Math.random() - 0.5);
+    for (const cat of catOrder) {
+      const bank = WORD_BANK[cat];
+      const easyLeft = bank.easy.filter(w => !used.includes(w));
+      const hardLeft = bank.hard.filter(w => !used.includes(w));
+      if (!easyLeft.length && !hardLeft.length) continue;
+      const useHard = (Math.random() < 0.3 && hardLeft.length > 0) || !easyLeft.length;
+      const arr = useHard ? hardLeft : easyLeft;
+      const word = arr[Math.floor(Math.random() * arr.length)];
+      used.push(word);
+      return { word, cat: CAT_LABEL[cat] };
+    }
+    return null;
+  };
+  if (preferCat && WORD_BANK[preferCat]) {
+    const r = tryPick([preferCat]);
+    if (r) return r; // 指定分类优先；该分类抽光则回退全库
+  }
+  const r = tryPick(cats);
+  if (r) return r;
+  const lastW = used[used.length - 1];
+  used.length = 0; // 兜底：全库抽光，重置后重试
+  if (lastW) used.push(lastW);
   const cat = cats[0];
   const w = WORD_BANK[cat].easy[0];
-  usedWords.add(w);
+  used.push(w);
   return { word: w, cat: CAT_LABEL[cat] };
 }
 // 推送当前画猜局状态（含最近笔画，供晚进的人回放）
@@ -220,6 +210,7 @@ function spyStateForClient(id) {
       isMe: pid === id,
       alive: !w.out,
       out: !!w.out,
+      disconnected: !!(s.disconnected && s.disconnected[pid]),
       voted: !!(s.votes && s.votes[pid] !== undefined),
       role: (s.phase === 'over') ? (w.role || null) : null  // 仅结算时全员可见身份
     };
@@ -245,6 +236,7 @@ function spyStateForClient(id) {
     votes: (s.phase === 'over') ? (s.votes || {}) : {},   // 投票去向仅结算时公开
     tally: (s.phase === 'vote' || s.phase === 'over') ? tally : {},
     round: s.round || 0,
+    speakDeadline: s.speakDeadline || 0,
     result: s.result || null,
     min: SPY_MIN, max: SPY_MAX,
     bankLabel: SPY_BANK_LABEL[s.bank || 'career']
@@ -256,26 +248,45 @@ function broadcastSpy() {
     c.send(JSON.stringify(spyStateForClient(c.userId)));
   }
 }
-// 进入发言阶段：把 speakIdx 指向第一个仍存活的玩家
+// 进入发言阶段：把 speakIdx 指向第一个仍存活的玩家，并启动发言倒计时
+let spySpeakTimer = null;
+function clearSpySpeakTimer() {
+  if (spySpeakTimer) { clearTimeout(spySpeakTimer); spySpeakTimer = null; }
+}
 function spyGotoSpeak() {
   const s = state.spy;
+  clearSpySpeakTimer();
   s.speakIdx = 0;
-  while (s.speakIdx < s.order.length && s.words[s.order[s.speakIdx]].out) s.speakIdx++;
-  if (s.speakIdx >= s.order.length) { s.phase = 'vote'; s.votes = {}; }
-  else s.phase = 'speak';
+  while (s.speakIdx < s.order.length && s.words[s.order[s.speakIdx]] && s.words[s.order[s.speakIdx]].out) s.speakIdx++;
+  if (s.speakIdx >= s.order.length) { s.phase = 'vote'; s.votes = {}; s.speakDeadline = 0; return; }
+  s.phase = 'speak';
+  s.speakDeadline = now() + SPY_SPEAK_MS;
+  spySpeakTimer = setTimeout(onSpySpeakTimeout, SPY_SPEAK_MS);
+}
+// 发言倒计时超时：当前发言者未描述，跳过进入下一位或投票阶段
+function onSpySpeakTimeout() {
+  const s = state.spy;
+  spySpeakTimer = null;
+  if (!s || s.phase !== 'speak') return;
+  s.speakIdx++;
+  while (s.speakIdx < s.order.length && s.words[s.order[s.speakIdx]] && s.words[s.order[s.speakIdx]].out) s.speakIdx++;
+  if (s.speakIdx >= s.order.length) { s.phase = 'vote'; s.votes = {}; s.speakDeadline = 0; }
+  else { s.phase = 'speak'; s.speakDeadline = now() + SPY_SPEAK_MS; spySpeakTimer = setTimeout(onSpySpeakTimeout, SPY_SPEAK_MS); }
+  saveState();
+  broadcastSpy();
 }
 // 投票结束后结算本轮：淘汰最高票玩家，判定胜负或进入下一轮
 function spyTally() {
   const s = state.spy;
-  const alive = s.players.filter(p => !s.words[p].out);
+  const alive = s.players.filter(p => s.words[p] && !s.words[p].out);
   const tally = {};
   Object.values(s.votes).forEach(t => { tally[t] = (tally[t] || 0) + 1; });
   let max = 0; Object.values(tally).forEach(v => { if (v > max) max = v; });
   const top = Object.keys(tally).filter(k => tally[k] === max);
   const eliminated = top[Math.floor(Math.random() * top.length)]; // 平票随机淘汰一人
-  s.words[eliminated].out = true;
-  const aliveSpies = s.players.filter(p => !s.words[p].out && s.words[p].role === 'spy').length;
-  const aliveTotal = s.players.filter(p => !s.words[p].out).length;
+  if (s.words[eliminated]) s.words[eliminated].out = true;
+  const aliveSpies = s.players.filter(p => s.words[p] && !s.words[p].out && s.words[p].role === 'spy').length;
+  const aliveTotal = s.players.filter(p => s.words[p] && !s.words[p].out).length;
   if (aliveSpies === 0) return spyFinish('civ', eliminated);
   if (aliveTotal === aliveSpies) return spyFinish('spy', eliminated);
   // 继续下一轮
@@ -312,7 +323,7 @@ function fmtDur(sec) {
 
 // 共享状态：users 以 id 为 key，chats 为聊天记录（保留最近 50 条），xhs 为小红书热榜缓存
 let state = {
-  day: todayStr(), week: weekStr(), month: monthStr(), users: {}, chats: [], xhs: { updated: 0, items: [] },
+  day: todayStr(), week: weekStr(), month: monthStr(), users: {}, usedWords: [], chats: [], xhs: { updated: 0, items: [] },
   game: { word: null, cat: null, drawerId: null, round: 0, ops: [], wordLen: 0, swapsLeft: 0, guessLog: [], solved: false, solvedBy: null, players: [], deadline: 0, settled: false, hint: null, hintGiven: false },
   spy: { phase: 'lobby', bank: 'career', anonymous: false, hostId: null, players: [], words: {}, order: [], speakIdx: 0, speeches: [], votes: {}, round: 0, result: null }
 };
@@ -322,14 +333,22 @@ function loadState() {
     if (fs.existsSync(DATA_FILE)) {
       const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
       if (raw && typeof raw.users === 'object') state = raw;
+      else throw new Error('结构无效，尝试备份');
     }
   } catch (e) {
-    console.error('读取存档失败，使用空状态:', e.message);
+    console.error('读取主存档失败，尝试 .tmp 备份:', e.message);
+    try {
+      if (fs.existsSync(DATA_TMP)) {
+        const raw = JSON.parse(fs.readFileSync(DATA_TMP, 'utf8'));
+        if (raw && typeof raw.users === 'object') { state = raw; console.error('已从 data.json.tmp 备份恢复'); }
+      }
+    } catch (e2) { console.error('备份恢复也失败，使用空状态:', e2.message); }
   }
   if (!state.day) state.day = todayStr();
   if (!state.week) state.week = weekStr();
   if (!state.month) state.month = monthStr();
   if (!state.users) state.users = {};
+  if (!Array.isArray(state.usedWords)) state.usedWords = [];
   if (!Array.isArray(state.chats)) state.chats = [];
   if (!state.xhs || !Array.isArray(state.xhs.items)) state.xhs = { updated: 0, items: [] };
   if (!state.game || typeof state.game !== 'object') state.game = { word: null, cat: null, drawerId: null, round: 0, ops: [], wordLen: 0, swapsLeft: 0, guessLog: [], solved: false, solvedBy: null, players: [], deadline: 0, settled: false, hint: null, hintGiven: false };
@@ -344,15 +363,25 @@ if (state.game && state.game.deadline && state.game.deadline < now()) {
 }
 
 let saveTimer = null;
+// 原子写盘：先写临时文件再 rename 覆盖，避免进程在写入中途崩溃导致 data.json 损坏、全部存档丢失
+function writeStateFileAtomic(content) {
+  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+  fs.writeFileSync(DATA_TMP, content);
+  fs.renameSync(DATA_TMP, DATA_FILE);
+}
 function saveState() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    try { fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true }); } catch (e) {}
-    fs.writeFile(DATA_FILE, JSON.stringify(state), (err) => {
-      if (err) console.error('存档写入失败:', err.message);
-    });
+    try { writeStateFileAtomic(JSON.stringify(state)); }
+    catch (e) { console.error('存档写入失败:', e.message); }
   }, 800);
+}
+// 立即落盘（绕过 800ms 防抖），用于定时兜底与关键时点
+function flushSave() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  try { writeStateFileAtomic(JSON.stringify(state)); }
+  catch (e) { console.error('存档写入失败:', e.message); }
 }
 
 const now = () => Date.now();
@@ -534,6 +563,8 @@ const wss = new WebSocketServer({ server });
 // 当前已点进「你画我猜」页面的用户 id 集合。
 // 只有在这个集合里的用户，才能认领画师座位、或保持画师身份（即必须"点进你画我猜页面"才行）。
 const drawPresent = new Set();
+// 谁是卧底：玩家断线后的宽限计时（uid -> setTimeout handle），宽限内重连则恢复身份
+const pendingSpyLeave = new Map();
 
 // 你画我猜：当前局的计时器（归零自动结算 / 150 秒出首字拼音提示）
 let drawTimer = null, drawHintTimer = null;
@@ -567,7 +598,7 @@ function onDrawTimeout() {
     ts: now()
   };
   state.chats.push(sys);
-  if (state.chats.length > 50) state.chats = state.chats.slice(-50);
+  if (state.chats.length > CHAT_KEEP) state.chats = state.chats.slice(-CHAT_KEEP);
   broadcastChat(sys);
 }
 function sendDrawHint() {
@@ -595,6 +626,9 @@ function pauseUser(id) {
 }
 
 wss.on('connection', (ws) => {
+  // 心跳保活：标记存活，收到 pong 时复位（配合下方定时 ping 清理僵死连接）
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   // 连接断开：若该用户无其他活跃连接，自动暂停计时（退出网页兜底）
   ws.on('close', () => {
     const uid = ws.userId;
@@ -613,34 +647,49 @@ wss.on('connection', (ws) => {
         saveState();
         broadcastDraw();
       }
-      // 谁是卧底：断开则退出本局；若人数不足则回大厅，避免卡死
+      // 谁是卧底：断开先宽限保留身份（用于重连恢复），宽限超时或人数不足才真正退出
       const sp = state.spy;
       if (sp && sp.players.includes(uid)) {
-        sp.players = sp.players.filter(p => p !== uid);
-        sp.order = (sp.order || []).filter(p => p !== uid);
-        delete sp.words[uid];
-        if (sp.phase === 'speak' && sp.order[sp.speakIdx] === uid) {
-          sp.speakIdx++;
-          while (sp.speakIdx < sp.order.length && sp.words[sp.order[sp.speakIdx]].out) sp.speakIdx++;
-          if (sp.speakIdx >= sp.order.length) { sp.phase = 'vote'; sp.votes = {}; }
-        }
-        const aliveLeft = sp.players.filter(p => sp.words[p] && !sp.words[p].out).length;
-        if (sp.phase !== 'lobby' && sp.phase !== 'over' && aliveLeft < SPY_MIN) {
-          sp.phase = 'lobby'; sp.words = {}; sp.order = []; sp.speakIdx = 0;
-          sp.speeches = []; sp.votes = {}; sp.round = 0; sp.result = null; sp.hostId = null;
-        }
+        sp.disconnected = sp.disconnected || {};
+        sp.disconnected[uid] = true;
+        if (pendingSpyLeave.has(uid)) clearTimeout(pendingSpyLeave.get(uid));
+        pendingSpyLeave.set(uid, setTimeout(() => {
+          pendingSpyLeave.delete(uid);
+          const s2 = state.spy;
+          if (!s2 || !s2.players.includes(uid)) return;
+          s2.players = s2.players.filter(p => p !== uid);
+          s2.order = (s2.order || []).filter(p => p !== uid);
+          delete s2.words[uid];
+          if (s2.disconnected) delete s2.disconnected[uid];
+          if (s2.phase === 'speak' && s2.order[s2.speakIdx] === uid) {
+            s2.speakIdx++;
+            while (s2.speakIdx < s2.order.length && s2.words[s2.order[s2.speakIdx]] && s2.words[s2.order[s2.speakIdx]].out) s2.speakIdx++;
+            if (s2.speakIdx >= s2.order.length) { s2.phase = 'vote'; s2.votes = {}; }
+          }
+          const aliveLeft = s2.players.filter(p => s2.words[p] && !s2.words[p].out).length;
+          if (s2.phase !== 'lobby' && s2.phase !== 'over' && aliveLeft < SPY_MIN) {
+            s2.phase = 'lobby'; s2.words = {}; s2.order = []; s2.speakIdx = 0;
+            s2.speeches = []; s2.votes = {}; s2.round = 0; s2.result = null; s2.hostId = null; clearSpySpeakTimer();
+          }
+          saveState();
+          broadcastSpy();
+        }, SPY_RECONNECT_GRACE));
         saveState();
         broadcastSpy();
       }
     }
   });
 
+  // 底层 socket 出错（如连接被重置）必须监听，否则会变成未捕获异常直接拖垮整个进程
+  ws.on('error', (e) => { console.error('[ws error]', ws.userId || '?', e && e.message); });
+
   // 新连接先发一份当前榜单（含服务端时间，用于客户端校正时钟漂移）+ 最近聊天记录
+  try {
   ws.send(JSON.stringify({
     type: 'state',
     serverNow: now(),
     users: Object.values(state.users).map(toClientUser),
-    chats: state.chats.slice(-50),
+    chats: state.chats.slice(-CHAT_KEEP),
     xhs: state.xhs
   }));
 
@@ -650,6 +699,7 @@ wss.on('connection', (ws) => {
   }
   // 谁是卧底：把当前局状态发给新连接（围观者 me=null，参与者拿到自己的词）
   ws.send(JSON.stringify(spyStateForClient(ws.userId)));
+  } catch (e) { console.error('[init send]', e && e.message); }
 
   ws.on('message', (buf) => {
     let msg;
@@ -657,12 +707,22 @@ wss.on('connection', (ws) => {
 
     const id = msg.id;
     if (!id) return;
+    try {
 
     if (msg.type === 'join') {
       const rawNick = String(msg.nickname || '').trim();
-      const safeNick = (rawNick && !FORBIDDEN_NICKS.includes(rawNick))
+      let safeNick = (rawNick && !FORBIDDEN_NICKS.includes(rawNick))
         ? rawNick
         : ('摸鱼咸鱼' + Math.floor(Math.random() * 900 + 100));
+      // 昵称可重复（数据按 id 隔离），但若与某在线用户完全相同，加后缀避免混淆
+      const onlineNicks = new Set();
+      for (const c of wss.clients) {
+        if (c.readyState === 1 && c.userId && state.users[c.userId]) onlineNicks.add(state.users[c.userId].nickname);
+      }
+      if (onlineNicks.has(safeNick)) {
+        let n = 2; while (onlineNicks.has(safeNick + '#' + n)) n++;
+        safeNick = safeNick + '#' + n;
+      }
       let u = state.users[id];
       if (!u) {
         u = {
@@ -682,6 +742,12 @@ wss.on('connection', (ws) => {
       }
       saveState();
       ws.userId = id; // 绑定连接与用户，供 close 时自动暂停
+      // 重连恢复：清除卧底断线宽限标记（若刚重连回来）
+      if (state.spy && state.spy.disconnected && state.spy.disconnected[id]) {
+        delete state.spy.disconnected[id];
+        if (pendingSpyLeave.has(id)) { clearTimeout(pendingSpyLeave.get(id)); pendingSpyLeave.delete(id); }
+        saveState(); broadcastSpy();
+      }
       broadcast();
     } else if (msg.type === 'start') {
       const u = state.users[id];
@@ -713,6 +779,9 @@ wss.on('connection', (ws) => {
       if (!u) return; // 未加入不能发言
       const text = String(msg.text || '').trim().slice(0, 200);
       if (!text) return;
+      const nowTs = now();
+      if (u.lastChat && nowTs - u.lastChat < CHAT_CD) return; // 发言冷却防刷屏
+      u.lastChat = nowTs;
       const m = {
         id: crypto.randomUUID ? crypto.randomUUID() : 'c' + now() + Math.random().toString(36).slice(2),
         uid: u.id,
@@ -722,7 +791,7 @@ wss.on('connection', (ws) => {
         ts: now()
       };
       state.chats.push(m);
-      if (state.chats.length > 50) state.chats = state.chats.slice(-50);
+      if (state.chats.length > CHAT_KEEP) state.chats = state.chats.slice(-CHAT_KEEP);
       saveState();
       const payload = JSON.stringify({ type: 'chat', msg: m });
       for (const c of wss.clients) {
@@ -732,6 +801,9 @@ wss.on('connection', (ws) => {
       // 抓摸鱼：举报别人在摸鱼（不能抓自己）
       const u = state.users[id];
       if (!u) return;
+      const nowTs = now();
+      if (u.lastCatch && nowTs - u.lastCatch < CATCH_CD) return; // 抓鱼冷却防刷
+      u.lastCatch = nowTs;
       const targetId = msg.target;
       if (!targetId || targetId === id) return;
       const t = state.users[targetId];
@@ -751,7 +823,7 @@ wss.on('connection', (ws) => {
         ts: now()
       };
       state.chats.push(sys);
-      if (state.chats.length > 50) state.chats = state.chats.slice(-50);
+      if (state.chats.length > CHAT_KEEP) state.chats = state.chats.slice(-CHAT_KEEP);
       saveState();
       const fx = JSON.stringify({ type: 'catch', by: who, target: victim, targetId, caught: t.caught });
       for (const c of wss.clients) if (c.readyState === 1) c.send(fx);
@@ -794,13 +866,16 @@ wss.on('connection', (ws) => {
         ts: nowTs
       };
       state.chats.push(sys);
-      if (state.chats.length > 50) state.chats = state.chats.slice(-50);
+      if (state.chats.length > CHAT_KEEP) state.chats = state.chats.slice(-CHAT_KEEP);
       broadcastChat(sys); // 系统播报实时进茶水间
       broadcast();
     } else if (msg.type === 'merit') {
       // 电子木鱼：敲一下功德+1
       const u = state.users[id];
       if (!u) return;
+      const nowTs = now();
+      if (u.lastMerit && nowTs - u.lastMerit < MERIT_CD) return; // 防狂敲
+      u.lastMerit = nowTs;
       u.merit = (u.merit || 0) + 1;
       saveState();
       const mp = JSON.stringify({ type: 'merit', id: u.id, merit: u.merit });
@@ -832,7 +907,7 @@ wss.on('connection', (ws) => {
       const drawerOnline = g.drawerId && state.users[g.drawerId] &&
         [...wss.clients].some(c => c.readyState === 1 && c.userId === g.drawerId);
       if (drawerOnline && !g.solved && g.drawerId !== id) return;
-      const w = pickWord();
+      const w = pickWord(msg.bank);
       state.game.word = w.word;
       state.game.cat = w.cat;
       state.game.wordLen = [...String(w.word)].length;
@@ -851,7 +926,7 @@ wss.on('connection', (ws) => {
       const g = state.game;
       if (!g || !g.drawerId || g.drawerId !== id) return; // 仅画师可换
       if ((g.swapsLeft || 0) <= 0) return;               // 次数已用完
-      const w = pickWord();
+      const w = pickWord(msg.bank);
       g.word = w.word; g.cat = w.cat;
       g.wordLen = [...String(w.word)].length;
       g.swapsLeft = (g.swapsLeft || 0) - 1;
@@ -919,7 +994,7 @@ wss.on('connection', (ws) => {
             ts: now()
           };
           state.chats.push(sys);
-          if (state.chats.length > 50) state.chats = state.chats.slice(-50);
+          if (state.chats.length > CHAT_KEEP) state.chats = state.chats.slice(-CHAT_KEEP);
           broadcastChat(sys);
           const sp = JSON.stringify({ type: 'drawSolved', word: g.word, solvedBy: id, solvedName: name });
           for (const c of wss.clients) if (c.readyState === 1) c.send(sp);
@@ -949,7 +1024,7 @@ wss.on('connection', (ws) => {
       const isDrawer = g.drawerId === id;
       const isPriv = DRAW_NEXT_ALLOW.includes(u.nickname);
       if (!isDrawer && !isPriv) return; // 既不是画师也不是特权昵称 → 忽略
-      const w = pickWord();
+      const w = pickWord(msg.bank);
       g.word = w.word; g.cat = w.cat;
       g.wordLen = [...String(w.word)].length;
       g.round = (g.round || 0) + 1;
@@ -1041,7 +1116,12 @@ wss.on('connection', (ws) => {
       const bankArr = SPY_BANKS[s.bank];
       let used = Array.isArray(s.usedPairs[s.bank]) ? s.usedPairs[s.bank] : [];
       let avail = bankArr.map((_, i) => i).filter(i => !used.includes(i));
-      if (!avail.length) { used = []; avail = bankArr.map((_, i) => i); } // 用完一轮重置
+      if (!avail.length) {
+        // 用完一轮重置，但排除刚用过的那一组，避免「重置瞬间立刻又抽到同一个」
+        const lastUsed = used.length ? used[used.length - 1] : -1;
+        used = [];
+        avail = bankArr.map((_, i) => i).filter(i => i !== lastUsed);
+      }
       const pairIdx = avail[Math.floor(Math.random() * avail.length)];
       s.usedPairs[s.bank] = used.concat(pairIdx);
       const pair = bankArr[pairIdx];
@@ -1074,8 +1154,9 @@ wss.on('connection', (ws) => {
       if (!text) return;
       s.speeches.push({ id, text });
       s.speakIdx++;
-      while (s.speakIdx < s.order.length && s.words[s.order[s.speakIdx]].out) s.speakIdx++;
-      if (s.speakIdx >= s.order.length) { s.phase = 'vote'; s.votes = {}; }
+      while (s.speakIdx < s.order.length && s.words[s.order[s.speakIdx]] && s.words[s.order[s.speakIdx]].out) s.speakIdx++;
+      if (s.speakIdx >= s.order.length) { s.phase = 'vote'; s.votes = {}; s.speakDeadline = 0; clearSpySpeakTimer(); }
+      else { s.phase = 'speak'; s.speakDeadline = now() + SPY_SPEAK_MS; clearSpySpeakTimer(); spySpeakTimer = setTimeout(onSpySpeakTimeout, SPY_SPEAK_MS); }
       saveState();
       broadcastSpy();
     } else if (msg.type === 'spyVote') {
@@ -1083,10 +1164,14 @@ wss.on('connection', (ws) => {
       if (s.phase !== 'vote') return;
       if (!s.words[id] || s.words[id].out) return;     // 出局者 / 非参与者不能投
       const t = msg.target;
-      if (!t || t === id) return;                     // 不能投自己
-      if (!s.words[t] || s.words[t].out) return;      // 只能投存活参与者
-      s.votes[id] = t;
-      const aliveCount = s.players.filter(p => !s.words[p].out).length;
+      if (t === undefined || t === null) return;
+      if (t === '') { s.votes[id] = ''; }              // 弃票：记为已投，但不指向任何人
+      else {
+        if (t === id) return;                          // 不能投自己
+        if (!s.words[t] || s.words[t].out) return;     // 只能投存活参与者
+        s.votes[id] = t;
+      }
+      const aliveCount = s.players.filter(p => s.words[p] && !s.words[p].out && !(s.disconnected && s.disconnected[p])).length;
       if (Object.keys(s.votes).length >= aliveCount) spyTally();
       saveState();
       broadcastSpy();
@@ -1108,11 +1193,24 @@ wss.on('connection', (ws) => {
       saveState();
       broadcastSpy();
     }
+    } catch (e) { console.error('[msg handler]', e && e.stack || e); }
   });
 });
 
 // 每秒广播一次，保证排行榜实时滚动、跨天/跨周/跨月清零能及时生效
-setInterval(broadcast, 1000);
+setInterval(() => { try { broadcast(); } catch (e) { console.error('[broadcast]', e && e.stack || e); } }, 1000);
+setInterval(() => { try { flushSave(); } catch (e) { console.error('[flushSave]', e && e.message || e); } }, 5000); // 定时兜底落盘，防止崩溃丢失超过 800ms 的数据
+// 心跳保活：每 30s 清理僵死连接（如被网关因空闲断开），避免连接堆积与内存泄漏
+const PING_MS = 30000;
+setInterval(() => {
+  try {
+    for (const ws of wss.clients) {
+      if (ws.isAlive === false) { try { ws.terminate(); } catch (e) {} continue; }
+      ws.isAlive = false;
+      try { ws.ping(); } catch (e) {}
+    }
+  } catch (e) { console.error('[ping]', e && e.message || e); }
+}, PING_MS);
 
 server.listen(PORT, () => {
   console.log(`🐟 摸鱼排行榜已启动： http://localhost:${PORT}`);
@@ -1122,5 +1220,6 @@ server.listen(PORT, () => {
     state.xhs = { updated: now(), items: XHS_FALLBACK, live: false };
   }
   refreshXhs();
-  setInterval(refreshXhs, 10 * 60 * 1000); // 每 10 分钟刷新一次小红书热榜
+  flushSave(); // 启动即落盘：确保初始状态（含精选榜兜底）持久化，也便于崩溃恢复
+  setInterval(() => { refreshXhs().catch(e => console.error('[xhs]', e && e.message || e)); }, 10 * 60 * 1000); // 每 10 分钟刷新一次小红书热榜
 });
