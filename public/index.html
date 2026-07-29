@@ -19,6 +19,7 @@
     <button id="darkToggle" class="ghost-btn" title="切换暗黑模式">🌙</button>
     <button id="switchUser" class="ghost-btn">🔄 切换用户</button>
     <button id="openDraw" class="ghost-btn draw-open">🎨 你画我猜</button>
+    <button id="openSpy" class="ghost-btn spy-open">🕵️ 谁是卧底</button>
   </header>
 
   <div id="tips" class="tips">💡 摸鱼有益身心健康（假的）</div>
@@ -153,7 +154,11 @@
     <div class="dg-top">
       <button id="drawClose" class="dg-close">‹ 返回</button>
       <div class="dg-round">第 <b id="dgRound">1</b> 轮 · 画师 <b id="dgDrawer">—</b></div>
+      <div id="dgTimer" class="dg-timer hidden">3:00</div>
     </div>
+
+    <div id="dgSpecBanner" class="dg-spec-banner hidden">👀 围观模式：点下方「参与游戏」后才能画画 / 猜词</div>
+    <div id="dgPinyin" class="dg-pinyin hidden"></div>
 
     <div class="dg-wordmask">
       <div class="dg-wm-l">
@@ -183,6 +188,7 @@
         <span class="dg-sw" data-c="#34C759" style="background:#34C759"></span>
         <span class="dg-sw" data-c="#FFD60A" style="background:#FFD60A"></span>
         <span class="dg-tool" id="dgEraser">橡皮</span>
+        <span class="dg-tool" id="dgUndo">↩️ 撤销</span>
         <span class="dg-tool" id="dgClear">清空</span>
         <span class="dg-tool" id="dgSwap">🔄 换词</span>
         <span class="dg-brush">细<input type="range" id="dgBrush" min="2" max="22" value="6"></span>
@@ -204,8 +210,74 @@
     <div class="dg-hint" id="dgHint">开局后，画师看词作画，其他人猜词 🎨</div>
 
     <div class="dg-actions">
-      <button id="dgStartBtn" class="dg-start">🎮 开始游戏（我当画师）</button>
+      <button id="dgJoinBtn" class="dg-join">🙌 参与游戏</button>
+      <button id="dgStartBtn" class="dg-start">🙋 我要当画师</button>
       <button id="dgNextBtn" class="dg-next hidden">下一轮</button>
+    </div>
+  </div>
+
+  <!-- 谁是卧底游戏层（全屏覆盖，苹果 iOS 极简风） -->
+  <div id="spyGame" class="spy-game hidden">
+    <div class="spy-top">
+      <button id="spyClose" class="spy-close">‹ 返回</button>
+      <div class="spy-title">🕵️ 谁是卧底</div>
+      <div id="spyMyScore" class="spy-myscore">积分 0</div>
+    </div>
+
+    <!-- 顶部：词库类型 + 匿名开关（仅大厅可改） -->
+    <div class="spy-topctrl" id="spyTopCtrl">
+      <div class="spy-banks">
+        <span class="spy-bank-lbl">词库</span>
+        <button class="spy-bank active" data-bank="career">职场</button>
+        <button class="spy-bank" data-bank="meme">网络热梗</button>
+      </div>
+      <label class="spy-anon">
+        <span class="spy-anon-lbl">匿名</span>
+        <input type="checkbox" id="spyAnon" />
+        <span class="spy-switch"></span>
+      </label>
+    </div>
+
+    <!-- 我的词条（游戏中参与者可见；不揭示身份） -->
+    <div class="spy-myword hidden" id="spyMyWord"></div>
+
+    <!-- 玩家列表 -->
+    <div class="spy-section">
+      <div class="spy-sec-title">已参与游戏 <span id="spyPlayerCount" class="spy-count">0</span><span class="spy-req">（3~8 人）</span></div>
+      <div id="spyPlayers" class="spy-players"></div>
+    </div>
+    <div class="spy-section">
+      <div class="spy-sec-title">围观人员</div>
+      <div id="spySpec" class="spy-spec"><span class="spy-empty">还没有人围观，叫上小伙伴一起玩～</span></div>
+    </div>
+
+    <!-- 发言区 -->
+    <div class="spy-speak hidden" id="spySpeakArea">
+      <div class="spy-cur" id="spyCur"></div>
+      <div id="spySpeakInputWrap" class="spy-speak-input-wrap hidden">
+        <input id="spySpeakInput" maxlength="120" placeholder="描述你的词（不能直接说出词语本身）" autocomplete="off" />
+        <button id="spySpeakSend">描述</button>
+      </div>
+      <div id="spySpeeches" class="spy-speeches"></div>
+    </div>
+
+    <!-- 投票区 -->
+    <div class="spy-vote hidden" id="spyVoteArea">
+      <div class="spy-vote-tip" id="spyVoteTip"></div>
+      <div id="spyVoteList" class="spy-vote-list"></div>
+    </div>
+
+    <!-- 结算区 -->
+    <div class="spy-result hidden" id="spyResultArea"></div>
+
+    <!-- 提示 -->
+    <div class="spy-hint" id="spyHint"></div>
+
+    <!-- 底部操作 -->
+    <div class="spy-actions">
+      <button id="spyJoinBtn" class="spy-join">参与游戏</button>
+      <button id="spyStartBtn" class="spy-start hidden">开始游戏</button>
+      <button id="spyRestartBtn" class="spy-restart hidden">重新开局</button>
     </div>
   </div>
 
