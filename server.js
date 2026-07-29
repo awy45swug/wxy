@@ -11,7 +11,6 @@
  */
 
 const http = require('http');
-const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -321,9 +320,9 @@ function fmtDur(sec) {
   return `${s}秒`;
 }
 
-// 共享状态：users 以 id 为 key，chats 为聊天记录（保留最近 50 条），xhs 为小红书热榜缓存
+// 共享状态：users 以 id 为 key，chats 为聊天记录
 let state = {
-  day: todayStr(), week: weekStr(), month: monthStr(), users: {}, usedWords: [], chats: [], xhs: { updated: 0, items: [] },
+  day: todayStr(), week: weekStr(), month: monthStr(), users: {}, usedWords: [], chats: [],
   game: { word: null, cat: null, drawerId: null, round: 0, ops: [], wordLen: 0, swapsLeft: 0, guessLog: [], solved: false, solvedBy: null, players: [], deadline: 0, settled: false, hint: null, hintGiven: false },
   spy: { phase: 'lobby', bank: 'career', anonymous: false, hostId: null, players: [], words: {}, order: [], speakIdx: 0, speeches: [], votes: {}, round: 0, result: null }
 };
@@ -350,7 +349,6 @@ function loadState() {
   if (!state.users) state.users = {};
   if (!Array.isArray(state.usedWords)) state.usedWords = [];
   if (!Array.isArray(state.chats)) state.chats = [];
-  if (!state.xhs || !Array.isArray(state.xhs.items)) state.xhs = { updated: 0, items: [] };
   if (!state.game || typeof state.game !== 'object') state.game = { word: null, cat: null, drawerId: null, round: 0, ops: [], wordLen: 0, swapsLeft: 0, guessLog: [], solved: false, solvedBy: null, players: [], deadline: 0, settled: false, hint: null, hintGiven: false };
   if (!state.spy || typeof state.spy !== 'object') state.spy = { phase: 'lobby', bank: 'career', anonymous: false, hostId: null, players: [], words: {}, order: [], speakIdx: 0, speeches: [], votes: {}, round: 0, result: null };
 }
@@ -457,71 +455,6 @@ function broadcastChat(m) {
   for (const c of wss.clients) {
     if (c.readyState === 1) c.send(payload);
   }
-}
-
-// ---------- 小红书每日爆款 Top30（后端代理热榜聚合接口，拉不到时回落精选榜） ----------
-const XHS_FALLBACK = [
-  '打工人的工位减脂餐，一周不重样', '显眼包穿搭才是夏日顶流', '带薪摸鱼一小时续命一整天',
-  '在家复刻网红奶茶，省下30块', '通勤包里到底装了什么', '打工人早C晚A护肤实录',
-  '租房改造｜10㎡也能很高级', '周末citywalkCity不city', '摸鱼文学大赛获奖作品',
-  '办公室养生茶包测评', '把Excel玩成游戏的人赢麻了', '今日份云吸猫已送达',
-  '下班后的副业搞钱实录', '打工人emo瞬间大赏', '便宜好用的国货护肤品',
-  '一个人也要好好吃饭', '拒绝内耗的100件小事', '工位绿植养护指南',
-  '摸鱼搭子招募中', '老板画饼图鉴合集', '打工人の快乐水推荐', '县城旅游才是真香',
-  '把通勤变成移动充电站', '带薪发呆的正当性论证', '电脑壁纸审美提升计划',
-  '摸鱼被抓后的演技修炼', '周五下班仪式感打卡', '周末补觉睡到自然醒',
-  '打工人的电子木鱼功德+1', '通勤路上听播客更快乐'
-].map((title, i) => ({ rank: i + 1, title, hot: '' }));
-
-function httpGet(url, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
-      let data = '';
-      res.on('data', (c) => (data += c));
-      res.on('end', () => resolve(data));
-    });
-    req.on('error', reject);
-    req.setTimeout(timeoutMs || 7000, () => { req.destroy(); reject(new Error('timeout')); });
-  });
-}
-
-function normalizeXhs(json) {
-  let arr = [];
-  if (Array.isArray(json)) arr = json;
-  else if (Array.isArray(json.data)) arr = json.data;
-  else if (json.data && Array.isArray(json.data.list)) arr = json.data.list;
-  else if (Array.isArray(json.list)) arr = json.list;
-  return arr
-    .slice(0, 30)
-    .map((it, i) => ({
-      rank: i + 1,
-      title: String(it.title || it.name || it.word || '').trim(),
-      hot: String(it.hot || it.heat || it.hotScore || it.score || '').trim()
-    }))
-    .filter((it) => it.title);
-}
-
-async function refreshXhs() {
-  try {
-    const raw = await httpGet('https://api.vvhan.com/api/hotlist?type=xiaohongshu', 8000);
-    const items = normalizeXhs(JSON.parse(raw));
-    if (items.length) {
-      state.xhs = { updated: now(), items, live: true };
-    } else {
-      throw new Error('空数据');
-    }
-  } catch (e) {
-    console.error('[xhs] 实时热榜拉取失败，使用精选榜:', e.message);
-    if (!state.xhs.items.length) state.xhs = { updated: now(), items: XHS_FALLBACK, live: false };
-    else state.xhs.live = false;
-  }
-  saveState();
-  broadcastXhs();
-}
-
-function broadcastXhs() {
-  const payload = JSON.stringify({ type: 'xhs', updated: state.xhs.updated, live: !!state.xhs.live, items: state.xhs.items });
-  for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
 }
 
 // ---------- 静态文件服务 ----------
@@ -694,8 +627,7 @@ wss.on('connection', (ws) => {
     type: 'state',
     serverNow: now(),
     users: Object.values(state.users).map(toClientUser),
-    chats: state.chats.slice(-CHAT_KEEP),
-    xhs: state.xhs
+    chats: state.chats.slice(-CHAT_KEEP)
   }));
 
   // 若当前已有画猜局，把局状态（含最近笔画）单独发给新连接，方便晚进的人回放
@@ -745,6 +677,8 @@ wss.on('connection', (ws) => {
         if (msg.avatar) u.avatar = msg.avatar;
         u.lastActive = now();
       }
+      // 进入网页自动开始计时（双保险：即便前端 start 消息因连接时机丢失也生效）
+      if (u && !u.running) { u.running = true; u.runStart = now(); }
       saveState();
       ws.userId = id; // 绑定连接与用户，供 close 时自动暂停
       // 重连恢复：清除卧底断线宽限标记（若刚重连回来）
@@ -1220,11 +1154,5 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`🐟 摸鱼排行榜已启动： http://localhost:${PORT}`);
   console.log(`   局域网内其他人访问 http://<你的IP>:${PORT} 即可一起摸鱼`);
-  // 先给一份精选榜兜底，保证新连接的客户端立即可见 Top30，随后实时拉取再升级
-  if (!state.xhs.items || !state.xhs.items.length) {
-    state.xhs = { updated: now(), items: XHS_FALLBACK, live: false };
-  }
-  refreshXhs();
-  flushSave(); // 启动即落盘：确保初始状态（含精选榜兜底）持久化，也便于崩溃恢复
-  setInterval(() => { refreshXhs().catch(e => console.error('[xhs]', e && e.message || e)); }, 10 * 60 * 1000); // 每 10 分钟刷新一次小红书热榜
+  flushSave(); // 启动即落盘：确保初始状态持久化，也便于崩溃恢复
 });
