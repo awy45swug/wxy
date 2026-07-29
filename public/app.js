@@ -1100,7 +1100,9 @@ $('dgStartBtn').onclick = () => {
   send({ type: 'drawStart', id: myId });
 };
 $('dgNextBtn').onclick = () => {
-  if (!dgAmDrawer()) { toast('只有画师能点「下一轮」🤫'); return; }
+  // 画师本人，或特权昵称（羡温言/LL/水果刀/慢慢）可点「下一轮」
+  const canAdvance = dgAmDrawer() || DRAW_NEXT_ALLOW.includes(myNick);
+  if (!canAdvance) { toast('只有画师或指定管理员能点「下一轮」🤫'); return; }
   send({ type: 'drawNext', id: myId });
 };
 $('dgSwap').onclick = () => {
