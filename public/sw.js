@@ -1,5 +1,8 @@
-/* 摸鱼计时排行榜 Service Worker — 网络优先，离线兜底 */
-const CACHE = 'moyu-v1';
+/* 摸鱼计时排行榜 Service Worker — 网络优先，离线兜底
+ * 重要：每次改前端代码（app.js/style.css/index.html）后，
+ * 一定要把 CACHE 升一版（v1→v2），否则老用户浏览器里还是旧 sw.js 在代理 fetch，
+ * install 阶段一次性 addAll 进去的 v1 缓存会一直兜底，导致新代码永远到不了。 */
+const CACHE = 'moyu-v2';
 const CORE = ['/', '/index.html', '/style.css', '/app.js', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', (e) => {
