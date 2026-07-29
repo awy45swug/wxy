@@ -83,20 +83,6 @@ function renderFortune() {
   }
 }
 
-// 小红书每日爆款 Top30（后端实时拉取；拉不到时用这份精选榜兜底）
-const XHS_FALLBACK = [
-  '打工人的工位减脂餐，一周不重样', '显眼包穿搭才是夏日顶流', '带薪摸鱼一小时续命一整天',
-  '在家复刻网红奶茶，省下30块', '通勤包里到底装了什么', '打工人早C晚A护肤实录',
-  '租房改造｜10㎡也能很高级', '周末citywalkCity不city', '摸鱼文学大赛获奖作品',
-  '办公室养生茶包测评', '把Excel玩成游戏的人赢麻了', '今日份云吸猫已送达',
-  '下班后的副业搞钱实录', '打工人emo瞬间大赏', '便宜好用的国货护肤品',
-  '一个人也要好好吃饭', '拒绝内耗的100件小事', '工位绿植养护指南',
-  '摸鱼搭子招募中', '老板画饼图鉴合集', '打工人の快乐水推荐', '县城旅游才是真香',
-  '把通勤变成移动充电站', '带薪发呆的正当性论证', '电脑壁纸审美提升计划',
-  '摸鱼被抓后的演技修炼', '周五下班仪式感打卡', '周末补觉睡到自然醒',
-  '打工人的电子木鱼功德+1'
-].map((title, i) => ({ rank: i + 1, title, hot: '' }));
-
 // 抓摸鱼成功后的趣味提示（{n}=被抓者昵称）
 const CATCH_TOASTS = [
   '🤚 抓到 {n} 在摸鱼！证据已截图（假的）',
@@ -141,11 +127,6 @@ let currentView = 'total';     // 'total' | 'today' | 'week' | 'month'
 
 /* ---------- 聊天记录（在线模式由后端下发） ---------- */
 let chatHistory = [];          // [{id, uid, nick, avatar, text, ts}]
-
-/* ---------- 小红书热榜（后端下发，离线用兜底） ---------- */
-let xhsItems = [];
-let xhsLive = false;
-let xhsUpdated = 0;
 
 /* ---------- WebSocket ---------- */
 const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -194,11 +175,6 @@ ws.onmessage = (e) => {
     const u = serverState.users.find((x) => x.id === msg.id);
     if (u) u.merit = msg.merit;
     renderMerit();
-  } else if (msg.type === 'xhs') {
-    xhsItems = msg.items || [];
-    xhsLive = !!msg.live;
-    xhsUpdated = msg.updated || 0;
-    renderXhs();
   } else if (msg.type === 'drawState') {
     applyDrawState(msg);
   } else if (msg.type === 'draw') {
@@ -248,7 +224,6 @@ function enterLocalMode() {
   else showModal();
   render();
   renderChat();
-  renderXhs();
 }
 function handleLocal(obj) {
   const id = obj.id || myId;
@@ -850,24 +825,7 @@ function renderMerit() {
 }
 $('woodfish').onclick = knock;
 
-/* ---------- 小红书每日爆款 Top30 ---------- */
-function renderXhs() {
-  const list = $('xhsList');
-  if (!list) return;
-  const items = (xhsItems && xhsItems.length) ? xhsItems : XHS_FALLBACK;
-  list.innerHTML = items.slice(0, 30).map((it) => `
-    <a class="xhs-item" href="https://www.xiaohongshu.com/search?keyword=${encodeURIComponent(it.title)}" target="_blank" rel="noopener">
-      <span class="xhs-rank">${it.rank || ''}</span>
-      <span class="xhs-title">${escapeHTML(it.title)}</span>
-      ${it.hot ? `<span class="xhs-hot">🔥${escapeHTML(it.hot)}</span>` : ''}
-    </a>`).join('');
-  const tip = $('xhsTip');
-  if (tip) {
-    const tstr = xhsUpdated ? new Date(xhsUpdated).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
-    tip.textContent = (xhsLive ? '🔴 实时热榜' : '📋 精选榜（实时源暂不可达）') + (tstr ? ` · 更新于 ${tstr}` : '');
-  }
-}
-renderXhs();
+/* ---------- 电子木鱼功德 ---------- */
 renderFortune(); // 启动即抽今日运势（待加入也会随 join 刷新）
 
 /* =========================================================
