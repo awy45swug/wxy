@@ -561,34 +561,6 @@ body {
 .m-nick { flex: 1; font-weight: 800; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .m-val { font-weight: 900; font-size: 15px; color: #c98a2e; flex-shrink: 0; }
 
-/* ---------- 小红书爆款 Top30 ---------- */
-.xhs-list { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
-.xhs-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: #fff;
-  border: 2px solid #f1e9f7;
-  border-radius: 14px;
-  padding: 10px 12px;
-  text-decoration: none;
-  color: var(--ink);
-  transition: transform 0.12s ease, border-color 0.12s;
-}
-.xhs-item:hover { border-color: var(--pink); transform: translateX(2px); }
-.xhs-item:active { transform: scale(0.99); }
-.xhs-rank {
-  flex-shrink: 0;
-  width: 28px; height: 28px;
-  display: grid; place-items: center;
-  border-radius: 50%;
-  font-weight: 900; font-size: 13px;
-  background: linear-gradient(135deg, var(--pink), var(--purple));
-  color: #fff;
-}
-.xhs-title { flex: 1; font-size: 14px; font-weight: 700; line-height: 1.4; }
-.xhs-hot { flex-shrink: 0; font-size: 12px; font-weight: 800; color: #ff5a5a; }
-
 /* ---------- 弹窗 ---------- */
 .modal-mask {
   position: fixed; inset: 0;
@@ -758,7 +730,7 @@ body.dark .chat-input { background: #1c1630; border-color: #3a2f55; color: var(-
 body.dark .wall-item { background: #2a2240; border-color: #3a3050; }
 body.dark .wall-text { color: var(--ink); }
 body.dark .wall-tip { color: #b6a3d8; }
-body.dark .chat-card, body.dark .merit-card, body.dark .xhs-card { background: #241d3a; }
+body.dark .chat-card, body.dark .merit-card { background: #241d3a; }
 body.dark .merit-mine { color: #ffc98a; }
 body.dark .merit-tip { color: #b6a3d8; }
 body.dark .woodfish { filter: drop-shadow(0 8px 14px rgba(0,0,0,0.5)); }
@@ -767,9 +739,6 @@ body.dark .merit-row.me { border-color: var(--pink); background: linear-gradient
 body.dark .m-ava { background: linear-gradient(135deg, #4a2f4a, #2a3a5a); }
 body.dark .m-nick { color: var(--ink); }
 body.dark .m-val { color: #ffc98a; }
-body.dark .xhs-item { background: #2a2240; border-color: #3a3050; color: var(--ink); }
-body.dark .xhs-title { color: var(--ink); }
-body.dark .xhs-hot { color: #ff8a8a; }
 body.dark .catch-btn { background: linear-gradient(135deg, #4a2f2a, #4a3a20); color: #ffb38a; border-color: #6a3a2a; }
 
 /* ---------- 手机端适配 ---------- */
