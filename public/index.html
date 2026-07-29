@@ -134,8 +134,8 @@
   <div id="joinModal" class="modal-mask">
     <div class="modal-box">
       <h2>🐟 加入摸鱼场</h2>
-      <p class="modal-sub">起个名字，挑个头像，开始你的表演</p>
-      <input id="nickInput" class="nick-input" maxlength="12" placeholder="给自己起个摸鱼昵称" />
+      <p class="modal-sub">起个名字，挑个头像，开始你的表演 <span class="req">（必填，不能匿名）</span></p>
+      <input id="nickInput" class="nick-input" maxlength="12" placeholder="给自己起个摸鱼昵称（必填）" />
       <div class="avatar-row" id="avatarRow"></div>
       <label class="upload-btn">
         📷 上传头像
@@ -159,6 +159,7 @@
       <div class="dg-wm-l">
         <span class="dg-lbl">本轮题目</span>
         <span id="dgWord" class="dg-word">点下方按钮开局</span>
+        <span id="dgWordLen" class="dg-wordlen"></span>
       </div>
       <span id="dgCat" class="dg-cat">职场</span>
     </div>
@@ -177,8 +178,13 @@
         <span class="dg-sw" data-c="#5AA9F0" style="background:#5AA9F0"></span>
         <span class="dg-sw" data-c="#E5689A" style="background:#E5689A"></span>
         <span class="dg-sw" data-c="#C8A25B" style="background:#C8A25B"></span>
+        <span class="dg-sw" data-c="#FF3B30" style="background:#FF3B30"></span>
+        <span class="dg-sw" data-c="#AF52DE" style="background:#AF52DE"></span>
+        <span class="dg-sw" data-c="#34C759" style="background:#34C759"></span>
+        <span class="dg-sw" data-c="#FFD60A" style="background:#FFD60A"></span>
         <span class="dg-tool" id="dgEraser">橡皮</span>
         <span class="dg-tool" id="dgClear">清空</span>
+        <span class="dg-tool" id="dgSwap">🔄 换词</span>
         <span class="dg-brush">细<input type="range" id="dgBrush" min="2" max="22" value="6"></span>
       </div>
     </div>
@@ -187,6 +193,14 @@
       <input id="dgGuessInput" placeholder="看画猜词，输入后点猜…" maxlength="20" autocomplete="off" />
       <button id="dgGuessSend">猜</button>
     </div>
+
+    <div class="dg-guesslog-wrap">
+      <div class="dg-guesslog-title">📝 猜词记录 <span class="dg-gl-tip">（所有人都能看到）</span></div>
+      <div id="dgGuessLog" class="dg-guesslog">
+        <div class="dg-gl-empty">还没有人猜，快来当第一个猜词王～</div>
+      </div>
+    </div>
+
     <div class="dg-hint" id="dgHint">开局后，画师看词作画，其他人猜词 🎨</div>
 
     <div class="dg-actions">
