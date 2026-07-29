@@ -1,0 +1,12 @@
+{
+  "name": "摸鱼计时排行榜",
+  "short_name": "摸鱼榜",
+  "description": "带薪摸鱼，从这一刻开始（老板勿入）",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F6F8F6",
+  "theme_color": "#86D1A8",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
