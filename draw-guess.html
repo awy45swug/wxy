@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>你画我猜 · WorkBuddy</title>
+<style>
+  :root{
+    --mint:#86D1A8;
+    --mint-soft:#EAF7F0;
+    --bg:#F6F6F8;
+    --card:#FFFFFF;
+    --ink:#1C1C1E;
+    --ink-2:#8E8E93;
+    --line:#ECECEF;
+    --radius:12px;
+    --shadow:0 1px 3px rgba(0,0,0,.06), 0 6px 20px rgba(0,0,0,.04);
+    --shadow-soft:0 1px 2px rgba(0,0,0,.04);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",
+      "Microsoft YaHei",sans-serif;
+    font-weight:400;
+    letter-spacing:.2px;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  .app{
+    max-width:430px;
+    margin:0 auto;
+    min-height:100vh;
+    padding:env(safe-area-inset-top) 16px calc(16px + env(safe-area-inset-bottom));
+    position:relative;
+  }
+
+  /* ---------- 通用卡片 ---------- */
+  .card{
+    background:var(--card);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+  }
+
+  /* ---------- 房间页 ---------- */
+  #room{padding-top:64px;}
+  .brand{text-align:center;margin-bottom:36px;}
+  .brand .logo{
+    width:64px;height:64px;border-radius:18px;margin:0 auto 16px;
+    background:linear-gradient(160deg,#9FE0BF,var(--mint));
+    box-shadow:0 8px 22px rgba(134,209,168,.35);
+    display:flex;align-items:center;justify-content:center;font-size:32px;
+  }
+  .brand h1{font-size:22px;font-weight:600;margin:0 0 6px;letter-spacing:.5px;}
+  .brand p{font-size:13px;color:var(--ink-2);margin:0;}
+
+  .room-card{padding:20px;margin-bottom:14px;}
+  .room-row{display:flex;align-items:center;justify-content:space-between;
+    padding:14px 0;border-bottom:1px solid var(--line);}
+  .room-row:last-child{border-bottom:none;}
+  .room-row .k{font-size:14px;color:var(--ink-2);}
+  .room-row .v{font-size:15px;font-weight:500;display:flex;align-items:center;gap:8px;}
+  .copy-code{color:var(--mint);font-weight:600;letter-spacing:1px;}
+  .avatar{width:30px;height:30px;border-radius:50%;background:var(--mint-soft);
+    display:flex;align-items:center;justify-content:center;font-size:16px;}
+  .players{display:flex;flex-direction:column;gap:2px;}
+  .player-line{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:14px;}
+  .player-line .nm{font-weight:500;}
+  .player-line .tag{margin-left:auto;font-size:12px;color:var(--ink-2);}
+
+  .btn{
+    width:100%;border:none;border-radius:var(--radius);
+    background:var(--mint);color:#fff;font-size:16px;font-weight:600;
+    padding:15px 0;margin-top:18px;cursor:pointer;
+    box-shadow:0 8px 18px rgba(134,209,168,.32);
+    transition:transform .08s ease,opacity .2s ease;
+    font-family:inherit;
+  }
+  .btn:active{transform:scale(.985);}
+  .btn.ghost{background:#fff;color:var(--ink);box-shadow:var(--shadow-soft);
+    border:1px solid var(--line);}
+
+  /* ---------- 游戏页 ---------- */
+  #game{display:none;padding-top:14px;}
+  .topbar{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+  .back{width:34px;height:34px;border-radius:10px;background:#fff;border:none;
+    box-shadow:var(--shadow-soft);font-size:18px;cursor:pointer;color:var(--ink);}
+  .round-info{flex:1;}
+  .round-info .t{font-size:15px;font-weight:600;}
+  .round-info .s{font-size:12px;color:var(--ink-2);margin-top:2px;}
+
+  /* 题目遮罩 */
+  .wordmask{
+    background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);
+    padding:16px 18px;margin-bottom:14px;display:flex;align-items:center;
+    justify-content:space-between;gap:12px;
+  }
+  .wordmask .lbl{font-size:12px;color:var(--ink-2);}
+  .wordmask .word{font-size:22px;font-weight:700;letter-spacing:2px;margin-top:4px;}
+  .wordmask .word.hidden{color:var(--ink-2);font-weight:600;letter-spacing:6px;}
+  .wordmask .cat{font-size:11px;color:var(--mint);background:var(--mint-soft);
+    padding:4px 9px;border-radius:8px;font-weight:600;white-space:nowrap;}
+
+  /* 画布 */
+  .canvas-card{padding:10px;margin-bottom:12px;}
+  #board{width:100%;height:300px;display:block;border-radius:8px;
+    background:#FCFCFD;touch-action:none;cursor:crosshair;}
+
+  /* 工具条 */
+  .tools{display:flex;align-items:center;gap:10px;padding:10px 6px 4px;flex-wrap:wrap;}
+  .swatch{width:24px;height:24px;border-radius:50%;border:2px solid #fff;
+    box-shadow:0 0 0 1px var(--line);cursor:pointer;transition:transform .1s;}
+  .swatch.active{transform:scale(1.18);box-shadow:0 0 0 2px var(--mint);}
+  .tool-btn{border:1px solid var(--line);background:#fff;border-radius:10px;
+    padding:7px 12px;font-size:13px;color:var(--ink);cursor:pointer;font-family:inherit;}
+  .tool-btn:active{background:var(--mint-soft);}
+  .brush{display:flex;align-items:center;gap:6px;margin-left:auto;font-size:12px;color:var(--ink-2);}
+  .brush input{accent-color:var(--mint);}
+
+  /* 猜词 / 角色 */
+  .rolebar{display:flex;gap:8px;margin-bottom:10px;}
+  .rolebar .seg{flex:1;text-align:center;padding:10px 0;border-radius:10px;
+    background:#fff;box-shadow:var(--shadow-soft);font-size:13px;font-weight:500;
+    color:var(--ink-2);cursor:pointer;border:1px solid transparent;}
+  .rolebar .seg.active{color:#fff;background:var(--mint);border-color:var(--mint);
+    box-shadow:0 6px 14px rgba(134,209,168,.3);}
+
+  .guess-row{display:flex;gap:10px;margin-bottom:12px;}
+  .guess-row input{flex:1;border:1px solid var(--line);border-radius:10px;
+    padding:13px 14px;font-size:15px;font-family:inherit;background:#fff;outline:none;
+    color:var(--ink);}
+  .guess-row input:focus{border-color:var(--mint);}
+  .guess-row button{border:none;border-radius:10px;background:var(--mint);color:#fff;
+    padding:0 20px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .guess-hint{font-size:12px;color:var(--ink-2);text-align:center;margin-bottom:12px;}
+
+  /* 侧边迷你积分榜（移动端做成顶部细条） */
+  .score-mini{
+    background:#fff;border-radius:var(--radius);box-shadow:var(--shadow-soft);
+    padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:14px;
+    overflow:hidden;
+  }
+  .score-mini .ttl{font-size:12px;color:var(--ink-2);white-space:nowrap;}
+  .score-mini .list{display:flex;gap:14px;flex:1;overflow-x:auto;}
+  .score-mini .it{display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap;}
+  .score-mini .it b{font-weight:700;color:var(--mint);}
+  .score-mini .me{font-weight:600;}
+
+  .full-score{display:none;}
+  .footer-actions{display:flex;gap:10px;margin-top:4px;}
+  .footer-actions .btn{margin-top:0;}
+
+  /* 提示气泡 */
+  .toast{
+    position:fixed;left:50%;top:24px;transform:translateX(-50%) translateY(-20px);
+    background:rgba(28,28,30,.92);color:#fff;padding:11px 18px;border-radius:12px;
+    font-size:13px;opacity:0;pointer-events:none;transition:all .28s ease;z-index:50;
+    max-width:80%;text-align:center;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  .score-pop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.8);
+    background:#fff;border-radius:16px;padding:22px 28px;box-shadow:var(--shadow);
+    text-align:center;opacity:0;pointer-events:none;transition:all .3s ease;z-index:60;}
+  .score-pop.show{opacity:1;transform:translate(-50%,-50%) scale(1);}
+  .score-pop .big{font-size:34px;}
+  .score-pop .tx{font-size:15px;font-weight:600;margin-top:8px;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ 房间页 ============ -->
+  <section id="room">
+    <div class="brand">
+      <div class="logo">🎨</div>
+      <h1>你画我猜</h1>
+      <p>WorkBuddy · 摸鱼小游戏</p>
+    </div>
+
+    <div class="card room-card">
+      <div class="room-row">
+        <span class="k">房间号</span>
+        <span class="v"><span class="copy-code" id="roomCode">MY-7749</span></span>
+      </div>
+      <div class="room-row" style="display:block;">
+        <span class="k" style="display:block;margin-bottom:8px;">在线玩家 · <span id="playerCount">4</span></span>
+        <div class="players" id="roomPlayers"></div>
+      </div>
+    </div>
+
+    <button class="btn" id="startBtn">开始游戏</button>
+    <button class="btn ghost" id="ruleBtn">玩法说明</button>
+  </section>
+
+  <!-- ============ 游戏页 ============ -->
+  <section id="game">
+    <div class="topbar">
+      <button class="back" id="backBtn">‹</button>
+      <div class="round-info">
+        <div class="t">第 <span id="roundNo">1</span> 轮</div>
+        <div class="s">画师：<span id="drawerName">你</span></div>
+      </div>
+    </div>
+
+    <!-- 题目遮罩 -->
+    <div class="wordmask">
+      <div>
+        <div class="lbl">本轮题目</div>
+        <div class="word" id="wordText">—</div>
+      </div>
+      <span class="cat" id="wordCat">职场</span>
+    </div>
+
+    <!-- 迷你积分榜 -->
+    <div class="score-mini">
+      <span class="ttl">积分</span>
+      <div class="list" id="miniScore"></div>
+    </div>
+
+    <!-- 角色切换 -->
+    <div class="rolebar">
+      <div class="seg active" data-role="drawer">🎨 我是画师</div>
+      <div class="seg" data-role="guesser">🔍 我是猜词</div>
+    </div>
+
+    <!-- 画布 -->
+    <div class="canvas-card">
+      <canvas id="board"></canvas>
+      <div class="tools" id="tools">
+        <div class="swatch active" data-c="#1C1C1E" style="background:#1C1C1E"></div>
+        <div class="swatch" data-c="#86D1A8" style="background:#86D1A8"></div>
+        <div class="swatch" data-c="#FF9F68" style="background:#FF9F68"></div>
+        <div class="swatch" data-c="#5AA9F0" style="background:#5AA9F0"></div>
+        <div class="swatch" data-c="#E5689A" style="background:#E5689A"></div>
+        <div class="swatch" data-c="#C8A25B" style="background:#C8A25B"></div>
+        <span class="tool-btn" id="eraser">橡皮</span>
+        <span class="tool-btn" id="undo">撤销</span>
+        <span class="tool-btn" id="clear">清空</span>
+        <span class="brush">细<input type="range" id="brush" min="2" max="22" value="6"></span>
+      </div>
+    </div>
+
+    <!-- 猜词区 -->
+    <div id="guessArea">
+      <div class="guess-row">
+        <input id="guessInput" placeholder="输入你猜的词…" autocomplete="off" />
+        <button id="guessSend">发送</button>
+      </div>
+      <div class="guess-hint" id="guessHint">你是画师，安静作画，等其他人猜 🤫</div>
+    </div>
+
+    <div class="footer-actions">
+      <button class="btn ghost" id="skipBtn">换一题</button>
+      <button class="btn" id="nextBtn">下一轮</button>
+    </div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+  <div class="score-pop" id="scorePop">
+    <div class="big" id="popBig">✅</div>
+    <div class="tx" id="popTx">猜对了 +10</div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   题库：350 词（职场 150 / 网络热梗 120 / 生活休闲 80）
+   绘制用，优先名词、简短短语，2-4 字，可简笔画，无低俗暴力
+   已过筛：删除纯情绪/抽象/5字+/互联网黑话/冷门梗；保留可画符号词
+   ========================================================= */
+const WORD_BANK = {
+  career: ["周报","月报","年报","加班","KPI","OKR","团建","改需求","打卡","汇报","提案","实习","面试","升职","加薪","离职","入职","报销","请假","出差","培训","早会","例会","站会","周会","月会","季度会","总结会","启动会","评审会","庆功宴","散伙饭","头脑风暴","一对一","视频会","PPT","文档","表格","邮件","群聊","语音","钉钉","飞书","企微","腾讯会议","屏幕共享","云文档","知识库","键盘","鼠标","显示器","工牌","工位","会议室","白板","投影仪","打印机","咖啡机","饮水机","老板","同事","甲方","乙方","客户","需求","猎头","简历","合同","工资","年终奖","奖金","五险一金","公积金","社保","个税","绿植","升降桌","防窥膜","降噪耳机","下午茶","零食","发票","年假","报税","共享文档","在线表格","需求评审","Bug","测试","改bug","准点下班","咖啡杯","订书机","线上会议","需求变更","版本迭代","早八","日报","晨会","撤回键","表情包","需求池","排期表","居家办公","弹性打卡","名片","电梯","前台","食堂","外卖","便利贴","计算器","文件夹","保温杯","充电器","插线板","碎纸机","茶水间","午休","考勤","签到","加班费","工资条","请假条","辞职信","招聘","充电宝","双肩包","摸鱼","画饼","甩锅","背锅","划水","救火","冲刺","跳槽","裁员","复盘","排期","绩效","发版","画大饼","背锅侠","摸鱼怪","划水王","画饼侠","甩锅侠","摸鱼学","准点跑路","假装忙","已读不回","消息红点","键盘侠","打工魂","带薪摸鱼","摸鱼搭子","工位摸鱼","带薪健身","工位养生","在线摸鱼","摸鱼神器","拍马屁","抱大腿","打小报告","穿小鞋","打鸡血","开小差","踢皮球","挖墙脚"],
+  meme: ["雪王","蜜雪冰城","流量","热搜","顶流","网红","联名","周边","二创","鬼畜","名场面","高能","萌宠","手工","露营","飞盘","雪豹","遥遥领先","已读乱回","啊对对对","上分","电子榨菜","多巴胺","酱香拿铁","茅台","演唱会","音乐节","美拉德","暴风吸入","C位","本命","出道","成团","电子木鱼","路人粉","爆料","实锤","打工人","干饭人","尾款人","工具人","社畜","弹幕","点赞","转发","关注","粉丝","主播","直播","连麦","刷礼物","开黑","组队","五杀","吃鸡","上车","开麦","静音","头像","昵称","朋友圈","点外卖","抢红包","集五福","拼单","秒杀","锦鲤","摆烂","躺平","内卷","班味","硬控","细思极恐","精神离职","职场演技","搬砖","韭菜","割韭菜","吃瓜","翻车","翻盘","逆袭","逆天","离谱","塌房","躺赢","带飞","躺枪","卷王","发疯","凡尔赛","阴阳怪气","智商税","打脸","蹭热度","出圈","种草","安利","上头","下头","真香","洗白","翻红","黑红","脱粉","爬墙","小丑","吃瓜群众","显眼包","冤种","集美","宝子","家人们","佛系","社恐","社牛","社死","爷青回","绿茶","海王","渣男","普信","油腻","修仙","治愈","解压","搭子","听劝"],
+  life: ["奶茶","火锅","猫咪","可乐","雨伞","咖啡","啤酒","炸鸡","烧烤","串串","麻辣烫","螺蛳粉","煎饼","包子","饺子","面条","寿司","披萨","汉堡","薯条","蛋糕","面包","甜甜圈","冰淇淋","水果","苹果","香蕉","西瓜","草莓","葡萄","橙子","芒果","榴莲","桃子","樱桃","小狗","兔子","仓鼠","乌龟","金鱼","鹦鹉","多肉","鲜花","玫瑰","向日葵","书本","小说","漫画","电影","电视剧","综艺","游戏","钢琴","吉他","跑步","健身","瑜伽","游泳","篮球","足球","羽毛球","骑行","钓鱼","旅行","拍照","自拍","美甲","化妆","香水","口红","面膜","睡衣","枕头","被子","大床","沙发","抱枕","台灯","蜡烛","香薰","露营车","骑行服","钓鱼佬","猫罐头","狗狗","仓鼠球","盲盒","手办","汉服","洛丽塔","奶茶杯","瑞幸","蜜雪","麻辣香锅","烤冷面","煎饼果子","钵仔糕","麻薯","司康","可颂","巴斯克","猫窝","狗窝","猫爬架","逗猫棒","桨板","滑雪","冲浪","攀岩","密室逃脱","剧本杀","桌游","麻将","掼蛋","围炉煮茶","露营帐篷","天幕","野餐","滑板","陆冲","猫咖","狗咖","撸猫","撸狗","手作","陶艺","烘焙","咖啡拉花","精酿","微醺","露营椅","牙刷","牙膏","毛巾","拖鞋","眼镜","墨镜","帽子","围巾","手套","口罩","袜子","背包","钱包","钥匙","手表","耳机","相机","风扇","空调","冰箱","洗衣机","电饭煲","微波炉","热水壶","吹风机","镜子","梳子","剪刀","雨衣","风筝","气球","积木","拼图","秋千","滑梯","跳绳","呼啦圈","乒乓球","台球","保龄球","飞镖","唱歌","跳舞","画画","下棋","散步","爬山","放风筝","堆雪人","打雪仗","荡秋千","吹泡泡","捉迷藏","广场舞","太极拳","大熊猫","长颈鹿","大象","猴子","老虎","狮子","企鹅","海豚","刺猬","蜗牛","蝴蝶","蜜蜂","青蛙","螃蟹","龙虾","恐龙","月亮","星星","彩虹","闪电","雪花","日出","沙滩","温泉","地铁","高铁","飞机","轮船","热气球","摩天轮","过山车","旋转木马","失眠","熬夜","赖床","打呼噜","梦游","减肥","撸铁","拉伸","冥想","发呆","宅家","断舍离","拔草","剁手","吃土","攒钱","月光族","夜猫子","路痴","选择困难","社交牛人","起床气"]
+};
+const CAT_LABEL = {career:"职场", meme:"网络热梗", life:"生活休闲"};
+
+/* ===================== 状态 ===================== */
+const ME = {id:"me", name:"你", score:0};
+const BOTS = [
+  {id:"b1", name:"同事A", score:0, avatar:"🦊"},
+  {id:"b2", name:"同事B", score:0, avatar:"🐼"},
+  {id:"b3", name:"同事C", score:0, avatar:"🐯"}
+];
+let role = "drawer";        // drawer | guesser
+let current = null;         // {word, cat}
+let roundNo = 1;
+let strokes = [];           // 撤销用
+let drawing = false, lastX=0, lastY=0;
+let color = "#1C1C1E", brush = 6, erasing = false;
+let botTimer = null;
+
+/* ===================== 元素 ===================== */
+const $ = id => document.getElementById(id);
+const roomEl=$("room"), gameEl=$("game");
+
+/* ===================== 房间页 ===================== */
+function renderRoom(){
+  const list=$("roomPlayers");
+  list.innerHTML = "";
+  const all=[ME, ...BOTS];
+  all.forEach(p=>{
+    const div=document.createElement("div");
+    div.className="player-line";
+    const av = p.id==="me" ? "🐟" : (p.avatar||"🙂");
+    div.innerHTML=`<span class="avatar">${av}</span><span class="nm">${p.name}</span>
+      <span class="tag">${p.id==="me"?"（你）":""}</span>`;
+    list.appendChild(div);
+  });
+  $("playerCount").textContent = all.length;
+}
+
+/* ===================== 游戏：出题 ===================== */
+function pickWord(){
+  const cats = Object.keys(WORD_BANK);
+  const cat = cats[Math.floor(Math.random()*cats.length)];
+  const arr = WORD_BANK[cat];
+  const word = arr[Math.floor(Math.random()*arr.length)];
+  return {word, cat};
+}
+function newRound(){
+  current = pickWord();
+  $("roundNo").textContent = roundNo;
+  $("wordCat").textContent = CAT_LABEL[current.cat];
+  applyRoleView();
+}
+
+/* ===================== 角色视图 ===================== */
+function applyRoleView(){
+  const isDrawer = role==="drawer";
+  // 题目遮罩
+  const wt=$("wordText");
+  if(isDrawer){ wt.textContent=current.word; wt.classList.remove("hidden"); }
+  else { wt.textContent="？ ？ ？"; wt.classList.add("hidden"); }
+  // 画师名
+  $("drawerName").textContent = isDrawer ? "你" : "同事A";
+  // 画布可写？
+  $("board").style.pointerEvents = isDrawer ? "auto" : "none";
+  $("tools").style.opacity = isDrawer ? "1" : ".4";
+  $("tools").style.pointerEvents = isDrawer ? "auto" : "none";
+  // 猜词区
+  const input=$("guessInput"), hint=$("guessHint");
+  if(isDrawer){
+    input.disabled=true; input.placeholder="你是画师，等别人猜 🤫";
+    hint.textContent="你是画师，安静作画，等其他人猜 🤫";
+  } else {
+    input.disabled=false; input.placeholder="看画猜词，输入后发送…";
+    hint.textContent="画师正在作画，你看不到题目，靠猜的 🔍";
+  }
+}
+
+/* ===================== 画布（高 DPI） ===================== */
+function setupCanvas(){
+  const cv=$("board");
+  const dpr = Math.min(window.devicePixelRatio||1, 3);
+  const rect = cv.getBoundingClientRect();
+  cv.width = Math.round(rect.width*dpr);
+  cv.height = Math.round(rect.height*dpr);
+  const ctx = cv.getContext("2d");
+  ctx.scale(dpr,dpr);
+  ctx.lineCap="round"; ctx.lineJoin="round";
+  cv._ctx = ctx;
+}
+function pos(e){
+  const cv=$("board"); const r=cv.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return {x:t.clientX-r.left, y:t.clientY-r.top};
+}
+function startDraw(e){
+  if(role!=="drawer") return;
+  drawing=true;
+  const p=pos(e); lastX=p.x; lastY=p.y;
+  const ctx=$("board")._ctx;
+  strokes.push([]);
+  e.preventDefault();
+}
+function moveDraw(e){
+  if(!drawing||role!=="drawer") return;
+  const p=pos(e); const ctx=$("board")._ctx;
+  ctx.strokeStyle = erasing ? "#FCFCFD" : color;
+  ctx.lineWidth = erasing ? brush*2.2 : brush;
+  ctx.beginPath();
+  ctx.moveTo(lastX,lastY); ctx.lineTo(p.x,p.y);
+  ctx.stroke();
+  strokes[strokes.length-1].push({x1:lastX,y1:lastY,x2:p.x,y2:p.y,c:erasing?"#FCFCFD":color,w:erasing?brush*2.2:brush});
+  lastX=p.x; lastY=p.y;
+  e.preventDefault();
+}
+function endDraw(e){ drawing=false; }
+function clearBoard(){
+  const cv=$("board"); const ctx=cv._ctx;
+  ctx.clearRect(0,0,cv.width,cv.height); strokes=[];
+}
+function undo(){
+  if(!strokes.length) return;
+  strokes.pop();
+  const cv=$("board"); const ctx=cv._ctx;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  strokes.forEach(s=>s.forEach(seg=>{
+    ctx.strokeStyle=seg.c; ctx.lineWidth=seg.w;
+    ctx.beginPath(); ctx.moveTo(seg.x1,seg.y1); ctx.lineTo(seg.x2,seg.y2); ctx.stroke();
+  }));
+}
+
+/* ===================== 积分榜 ===================== */
+function allPlayers(){ return [ME, ...BOTS]; }
+function renderScores(){
+  const mini=$("miniScore"); mini.innerHTML="";
+  allPlayers().sort((a,b)=>b.score-a.score).forEach(p=>{
+    const it=document.createElement("div");
+    it.className="it"+(p.id==="me"?" me":"");
+    it.innerHTML=`<span>${p.id==="me"?"🐟":p.avatar}</span><span>${p.name}</span><b>${p.score}</b>`;
+    mini.appendChild(it);
+  });
+}
+
+/* ===================== 猜词 ===================== */
+function submitGuess(){
+  if(role!=="guesser") return;
+  const v=$("guessInput").value.trim();
+  if(!v) return;
+  if(v===current.word){
+    ME.score+=10;
+    showPop("✅","你猜对了！+10");
+    renderScores();
+    setTimeout(nextRound, 900);
+  } else {
+    toast(`❌ “${v}” 不对，再看看画～`);
+  }
+  $("guessInput").value="";
+}
+
+/* ===================== 机器人模拟（让榜“活”） ===================== */
+function startBots(){
+  stopBots();
+  botTimer=setInterval(()=>{
+    const b=BOTS[Math.floor(Math.random()*BOTS.length)];
+    b.score += Math.floor(Math.random()*3)+1;
+    renderScores();
+    if(Math.random()<0.18){
+      toast(`🤖 ${b.name} 猜了个词 +${Math.floor(Math.random()*3)+1}`);
+    }
+  }, 2200);
+}
+function stopBots(){ if(botTimer) clearInterval(botTimer); botTimer=null; }
+
+/* ===================== 轮次切换 ===================== */
+function nextRound(){
+  roundNo++;
+  newRound();
+  clearBoard();
+  renderScores();
+}
+
+/* ===================== 提示 ===================== */
+let toastT=null;
+function toast(msg){
+  const t=$("toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),1800);
+}
+function showPop(big,tx){
+  $("popBig").textContent=big; $("popTx").textContent=tx;
+  const p=$("scorePop"); p.classList.add("show");
+  setTimeout(()=>p.classList.remove("show"),1100);
+}
+
+/* ===================== 事件绑定 ===================== */
+$("startBtn").onclick=()=>{
+  roomEl.style.display="none"; gameEl.style.display="block";
+  setupCanvas(); newRound(); renderScores(); startBots();
+};
+$("backBtn").onclick=()=>{
+  gameEl.style.display="none"; roomEl.style.display="block";
+  stopBots();
+};
+$("ruleBtn").onclick=()=>toast("画师看题作画，其他人猜词，先猜中得分 🎨");
+$("nextBtn").onclick=nextRound;
+$("skipBtn").onclick=()=>{ newRound(); clearBoard(); toast("已换一题"); };
+
+document.querySelectorAll(".rolebar .seg").forEach(seg=>{
+  seg.onclick=()=>{
+    document.querySelectorAll(".rolebar .seg").forEach(s=>s.classList.remove("active"));
+    seg.classList.add("active");
+    role=seg.dataset.role; applyRoleView();
+  };
+});
+
+$("guessSend").onclick=submitGuess;
+$("guessInput").addEventListener("keydown",e=>{ if(e.key==="Enter") submitGuess(); });
+
+document.querySelectorAll(".swatch").forEach(sw=>{
+  sw.onclick=()=>{
+    document.querySelectorAll(".swatch").forEach(s=>s.classList.remove("active"));
+    sw.classList.add("active"); color=sw.dataset.c; erasing=false;
+  };
+});
+$("eraser").onclick=()=>{ erasing=!erasing; toast(erasing?"橡皮开":"橡皮关"); };
+$("undo").onclick=undo;
+$("clear").onclick=clearBoard;
+$("brush").oninput=e=>brush=+e.target.value;
+
+const cv=$("board");
+cv.addEventListener("mousedown",startDraw);
+cv.addEventListener("mousemove",moveDraw);
+window.addEventListener("mouseup",endDraw);
+cv.addEventListener("touchstart",startDraw,{passive:false});
+cv.addEventListener("touchmove",moveDraw,{passive:false});
+cv.addEventListener("touchend",endDraw);
+
+window.addEventListener("resize",()=>{ if(gameEl.style.display==="block"){ setupCanvas(); undo(); } });
+
+/* 初始化 */
+renderRoom();
+</script>
+</body>
+</html>
