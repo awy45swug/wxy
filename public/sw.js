@@ -19,7 +19,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  if (url.origin !== location.origin) return; // 跨域（如小红书接口）不拦截
+  if (url.origin !== location.origin) return; // 跨域请求不拦截（如外部 API）
   // 网络优先：保证部署后拿到最新代码；断网时回退缓存
   e.respondWith(
     fetch(e.request)
