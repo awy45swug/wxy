@@ -829,9 +829,14 @@ body.dark .catch-btn { background: linear-gradient(135deg, #4a2f2a, #4a3a20); co
 .dg-score-list .it.me { font-weight: 600; }
 
 .dg-canvas-card { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 6px 20px rgba(0,0,0,.04);
-  padding: 10px; margin-bottom: 12px; }
-#dgBoard { width: 100%; height: 300px; display: block; border-radius: 8px; background: #FCFCFD;
+  padding: 10px; margin-bottom: 12px; max-width: 640px; margin-left: auto; margin-right: auto; }
+/* 固定 4:3 宽高比：电脑/手机看到的画面比例完全一致，归一化笔画不会被拉伸变形 */
+#dgBoard { width: 100%; aspect-ratio: 4 / 3; height: auto; display: block; border-radius: 8px; background: #FCFCFD;
   touch-action: none; cursor: crosshair; }
+/* 不支持 aspect-ratio 的老浏览器兜底（近似 4:3） */
+@supports not (aspect-ratio: 4 / 3) {
+  #dgBoard { height: 300px; }
+}
 .dg-tools { display: flex; align-items: center; gap: 9px; padding: 10px 4px 2px; flex-wrap: wrap; }
 .dg-sw { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #ECECEF; cursor: pointer; transition: transform .1s; }
 .dg-sw.active { transform: scale(1.18); box-shadow: 0 0 0 2px #86D1A8; }
