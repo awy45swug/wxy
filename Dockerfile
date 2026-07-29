@@ -1,5 +1,7 @@
 # 摸鱼计时排行榜 - 部署镜像
-FROM node:18-alpine
+# 备注：如遇 CloudBase 构建层缓存校验失败 (invalid checksum digest format)，
+# 可临时把基础镜像切到 node:20-alpine 触发全新 layer 下载绕过。
+FROM node:20-alpine
 
 WORKDIR /app
 
