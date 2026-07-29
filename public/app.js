@@ -1426,9 +1426,14 @@ function spyRender() {
   } else {
     startBtn.classList.add('hidden');
   }
-  // 重新开局（所有人可见；游戏中置灰）
-  restartBtn.classList.remove('hidden');
-  restartBtn.disabled = playing;
+  // 重新开局（仅房主可操作；游戏中隐藏）
+  if (playing) {
+    restartBtn.classList.add('hidden');
+  } else {
+    restartBtn.classList.remove('hidden');
+    restartBtn.disabled = !host;
+    restartBtn.textContent = host ? '🔄 重新开局' : '等房主重新开局';
+  }
 }
 
 // 事件绑定
