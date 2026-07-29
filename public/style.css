@@ -686,6 +686,20 @@ body {
 .toast.hidden { display: none; }
 @keyframes toast-in { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 
+/* 断线重连横幅 */
+.conn-bar {
+  position: fixed; top: 0; left: 0; right: 0;
+  background: linear-gradient(90deg, #FF9F0A, #FFB340);
+  color: #3A2B00; font-weight: 700; font-size: 13px;
+  text-align: center; padding: 8px 12px;
+  z-index: 95;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+  animation: connbar-in 0.25s ease;
+}
+.conn-bar.hidden { display: none; }
+@keyframes connbar-in { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+body.dark .conn-bar { background: linear-gradient(90deg, #B7791F, #D99A2B); color: #1C1400; }
+
 .hidden { display: none !important; }
 
 /* ---------- 暗黑模式 ---------- */
