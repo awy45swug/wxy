@@ -155,6 +155,8 @@ function scheduleReconnect() {
   setTimeout(connect, reconnectDelay);
   reconnectDelay = Math.min(reconnectDelay * 2, 15000);
 }
+function showConnBar() { const b = $('connBar'); if (b) b.classList.remove('hidden'); }
+function hideConnBar() { const b = $('connBar'); if (b) b.classList.add('hidden'); }
 function connect() {
   ws = new WebSocket(`${wsProto}//${location.host}`);
 let clockOffset = 0; // serverNow - clientNow，用于校正时钟漂移
@@ -163,6 +165,7 @@ let lastTotal = {}; // 记录上次展示的时长，用于触发数字 pop 动�
 
   ws.onopen = () => {
     wsConnected = true;
+    hideConnBar();            // 重连成功，隐藏断线横幅
     reconnectDelay = 1000;     // 连上即重置退避
     clearTimeout(connectTimer);
     if (myNick) { sendJoin(); hideModal(); }
@@ -221,6 +224,7 @@ ws.onerror = () => { if (!wsConnected) enterLocalMode(); };
   ws.onclose = () => {
     if (!wsConnected) { enterLocalMode(); return; }
     wsConnected = false;            // 在线中途断线：不整页刷新，指数退避重连
+    showConnBar();               // 顶部显示「重连中」横幅，让用户有感知
     scheduleReconnect();
   };
 }
