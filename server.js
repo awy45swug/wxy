@@ -52,14 +52,24 @@ const SPY_BANKS = {
     { civ: '开会', spy: '培训' }, { civ: '工资', spy: '奖金' }, { civ: '简历', spy: '名片' },
     { civ: '同事', spy: '搭档' }, { civ: '出差', spy: '旅行' }, { civ: 'KPI', spy: 'OKR' },
     { civ: '团建', spy: '聚餐' }, { civ: '报销', spy: '发票' }, { civ: '离职', spy: '请假' },
-    { civ: '面试', spy: '笔试' }, { civ: '工位', spy: '卡座' }, { civ: '调休', spy: '年假' }
+    { civ: '面试', spy: '笔试' }, { civ: '工位', spy: '卡座' }, { civ: '调休', spy: '年假' },
+    { civ: '打卡', spy: '签到' }, { civ: '老板', spy: '领导' }, { civ: '加薪', spy: '升职' },
+    { civ: '裁员', spy: '辞退' }, { civ: '实习', spy: '试用' }, { civ: '食堂', spy: '外卖' },
+    { civ: '下午茶', spy: '夜宵' }, { civ: '会议室', spy: '办公室' }, { civ: '甲方', spy: '客户' },
+    { civ: '跳槽', spy: '转行' }, { civ: '年终奖', spy: '十三薪' }, { civ: '迟到', spy: '早退' },
+    { civ: '邮件', spy: '短信' }, { civ: '键盘', spy: '鼠标' }, { civ: '白板', spy: '黑板' }
   ],
   meme: [
     { civ: '绝绝子', spy: 'yyds' }, { civ: '躺平', spy: '摆烂' }, { civ: 'emo', spy: '破防' },
     { civ: '显眼包', spy: '社牛' }, { civ: '搭子', spy: '朋友' }, { civ: '雪糕刺客', spy: '价格刺客' },
     { civ: '电子榨菜', spy: '下饭剧' }, { civ: '班味', spy: '人夫感' }, { civ: '听劝', spy: '劝分' },
     { civ: 'CPU你', spy: 'PUA你' }, { civ: '硬控', spy: '控场' }, { civ: '冤种', spy: '铁憨憨' },
-    { civ: '上头', spy: '上瘾' }, { civ: 'i人', spy: 'e人' }, { civ: '尊嘟', spy: '假嘟' }
+    { civ: '上头', spy: '上瘾' }, { civ: 'i人', spy: 'e人' }, { civ: '尊嘟', spy: '假嘟' },
+    { civ: '吃瓜', spy: '围观' }, { civ: '网红', spy: '顶流' }, { civ: '点赞', spy: '转发' },
+    { civ: '弹幕', spy: '评论' }, { civ: '开黑', spy: '组队' }, { civ: '干饭', spy: '恰饭' },
+    { civ: '种草', spy: '安利' }, { civ: '拉黑', spy: '屏蔽' }, { civ: '刷屏', spy: '霸屏' },
+    { civ: '热搜', spy: '热榜' }, { civ: '直播', spy: '录播' }, { civ: '表情包', spy: '梗图' },
+    { civ: '剧透', spy: '爆料' }, { civ: '私聊', spy: '群聊' }, { civ: '社恐', spy: '内向' }
   ]
 };
 const SPY_BANK_LABEL = { career: '职场词库', meme: '网络热梗词库' };
@@ -1008,12 +1018,23 @@ wss.on('connection', (ws) => {
       if (s.phase !== 'lobby') return;
       if (!SPY_HOST_ALLOW.includes(u.nickname)) return;
       if (s.players.length < SPY_MIN || s.players.length > SPY_MAX) return;
-      const pair = SPY_BANKS[s.bank][Math.floor(Math.random() * SPY_BANKS[s.bank].length)];
-      const order = shuffle(s.players);
-      const spyCount = order.length <= 5 ? 1 : 2; // 3~5 人 1 卧底，6~8 人 2 卧底
+      // 词条不重复：记住本词库已用过的组，全部用完才重置重新轮
+      s.usedPairs = (s.usedPairs && typeof s.usedPairs === 'object') ? s.usedPairs : {};
+      const bankArr = SPY_BANKS[s.bank];
+      let used = Array.isArray(s.usedPairs[s.bank]) ? s.usedPairs[s.bank] : [];
+      let avail = bankArr.map((_, i) => i).filter(i => !used.includes(i));
+      if (!avail.length) { used = []; avail = bankArr.map((_, i) => i); } // 用完一轮重置
+      const pairIdx = avail[Math.floor(Math.random() * avail.length)];
+      s.usedPairs[s.bank] = used.concat(pairIdx);
+      const pair = bankArr[pairIdx];
+      // 身份分配与发言顺序独立洗牌，避免"发言第一位必是卧底"
+      const roleOrder = shuffle(s.players);   // 决定谁是卧底
+      const order = shuffle(s.players);       // 决定发言顺序（与身份无关）
+      const spyCount = s.players.length <= 5 ? 1 : 2; // 3~5 人 1 卧底，6~8 人 2 卧底
+      const spySet = new Set(roleOrder.slice(0, spyCount));
       s.words = {};
-      order.forEach((pid, i) => {
-        const role = i < spyCount ? 'spy' : 'civ';
+      s.players.forEach(pid => {
+        const role = spySet.has(pid) ? 'spy' : 'civ';
         s.words[pid] = { role, word: role === 'spy' ? pair.spy : pair.civ, code: codeFor(pid), out: false };
       });
       s.order = order;
