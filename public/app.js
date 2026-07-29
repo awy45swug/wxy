@@ -186,8 +186,11 @@ ws.onmessage = (e) => {
     drawClearCanvas();
   } else if (msg.type === 'drawGuess') {
     if (msg.id !== myId) toast(`💬 ${msg.name} 猜：“${msg.text}”`);
-  } else if (msg.type === 'drawCorrect') {
-    drawCorrectFx(msg);
+    dgPushGuess(msg.id, msg.name, msg.text, false);
+  } else if (msg.type === 'drawSolved') {
+    onDrawSolved(msg);
+  } else if (msg.type === 'drawSwap') {
+    onDrawSwap(msg);
   }
 };
 ws.onerror = () => { if (!wsConnected) enterLocalMode(); };
@@ -241,6 +244,8 @@ function handleLocal(obj) {
     const tamt = Math.min(amt, t.todayBase || 0);
     t.totalBase -= amt; u.totalBase += amt;
     t.todayBase -= tamt; u.todayBase += tamt;
+    t.weekBase = (t.weekBase || 0) - tamt; u.weekBase = (u.weekBase || 0) + tamt;
+    t.monthBase = (t.monthBase || 0) - tamt; u.monthBase = (u.monthBase || 0) + tamt;
     t.stolen = (t.stolen || 0) + 1; u.stealCount = (u.stealCount || 0) + 1;
   }
   saveLocal();
@@ -482,6 +487,17 @@ $('btnStop').onclick = () => {
   toast('🎣 本局摸鱼已入账，干得漂亮');
 };
 
+/* ---------- 退出网页自动暂停计时 ---------- */
+function autoPause() {
+  if (mode === 'online' && ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'pause', id: myId }));
+  } else if (mode === 'local') {
+    handleLocal({ type: 'pause', id: myId });
+  }
+}
+window.addEventListener('beforeunload', autoPause);
+window.addEventListener('pagehide', autoPause);
+
 /* ---------- 切换用户（生成全新身份，旧身份记录留在榜上） ---------- */
 $('switchUser').onclick = () => {
   myId = (crypto.randomUUID ? crypto.randomUUID() : 'u' + Math.random().toString(36).slice(2) + Date.now());
@@ -570,7 +586,8 @@ $('avatarUpload').onchange = (e) => {
 };
 
 $('joinBtn').onclick = () => {
-  const nick = $('nickInput').value.trim() || '匿名咸鱼';
+  const nick = $('nickInput').value.trim();
+  if (!nick) { toast('🐟 取个名字才能进场哦（不能匿名）'); $('nickInput').focus(); return; }
   myNick = nick;
   myAvatar = selectedAvatar;
   localStorage.setItem('moyu_nick', myNick);
@@ -825,7 +842,7 @@ renderFortune(); // 启动即抽今日运势（待加入也会随 join 刷新）
  * 你画我猜（并入摸鱼网页，复用同一 WebSocket 房间，真·多人实时）
  * 画师看词作画，其他人猜词；笔画实时同步、晚进者可回放最近笔画
  * ========================================================= */
-let dgState = { word: null, cat: null, drawerId: null, round: 0, ops: [] };
+let dgState = { word: null, cat: null, drawerId: null, round: 0, ops: [], wordLen: 0, swapsLeft: 0, guessLog: [], solved: false, solvedBy: null };
 let dgDrawing = false, dgLast = null, dgColor = '#1C1C1E', dgBrush = 6, dgErase = false;
 let dgReady = false; // 画布是否已初始化
 const dgCanvas = () => $('dgBoard');
@@ -893,11 +910,16 @@ function dgActive() { return !!dgState.drawerId; }
 
 // 应用后端下发的局状态
 function applyDrawState(s) {
-  dgState = { word: s.word, cat: s.cat, drawerId: s.drawerId, round: s.round || 0, ops: s.ops || [] };
+  dgState = {
+    word: s.word, cat: s.cat, drawerId: s.drawerId, round: s.round || 0, ops: s.ops || [],
+    wordLen: s.wordLen || 0, swapsLeft: s.swapsLeft || 0, guessLog: s.guessLog || [],
+    solved: !!s.solved, solvedBy: s.solvedBy || null
+  };
   dgRender();
   // 回放最近笔画（清空后重画）
   drawClearCanvas();
   (dgState.ops || []).forEach(dgDrawSeg);
+  dgRenderGuessLog();
 }
 function dgRender() {
   const round = $('dgRound'); if (round) round.textContent = dgState.round || 1;
@@ -905,34 +927,71 @@ function dgRender() {
   const drawerUser = serverState.users.find(u => u.id === dgState.drawerId);
   const dn = $('dgDrawer'); if (dn) dn.textContent = drawerUser ? (drawerUser.nickname || '匿名咸鱼') : (dgAmDrawer() ? '你' : '—');
   const wordEl = $('dgWord');
-  const startBtn = $('dgStartBtn'), nextBtn = $('dgNextBtn');
+  const wordLenEl = $('dgWordLen');
+  const startBtn = $('dgStartBtn'), nextBtn = $('dgNextBtn'), swapBtn = $('dgSwap');
   const tools = $('dgTools'), guessInput = $('dgGuessInput'), guessSend = $('dgGuessSend');
   const hint = $('dgHint');
 
+  // 字数提示：画师/猜词人都显示"共 N 个字"
+  const lenTxt = dgState.wordLen ? `（共 ${dgState.wordLen} 个字）` : '';
+
   if (!dgActive()) {
     if (wordEl) { wordEl.textContent = '点下方按钮开局'; wordEl.classList.remove('hide'); }
+    if (wordLenEl) wordLenEl.textContent = '';
     if (startBtn) startBtn.classList.remove('hidden');
     if (nextBtn) nextBtn.classList.add('hidden');
+    if (swapBtn) swapBtn.classList.add('hidden');
     if (tools) tools.classList.add('dim');
     if (guessInput) { guessInput.disabled = true; guessInput.placeholder = '还没开局呢～'; }
     if (guessSend) guessSend.disabled = true;
     if (hint) hint.textContent = '点「开始游戏」当画师，开局后其他人来猜 🎨';
   } else if (dgAmDrawer()) {
     if (wordEl) { wordEl.textContent = dgState.word || '—'; wordEl.classList.remove('hide'); }
+    if (wordLenEl) wordLenEl.textContent = lenTxt;
     if (startBtn) startBtn.classList.add('hidden');
-    if (nextBtn) nextBtn.classList.remove('hidden');
+    if (nextBtn) { nextBtn.classList.remove('hidden'); nextBtn.classList.remove('disabled'); nextBtn.textContent = '下一轮'; }
+    if (swapBtn) {
+      swapBtn.classList.remove('hidden');
+      if ((dgState.swapsLeft || 0) > 0) {
+        swapBtn.classList.remove('disabled');
+        swapBtn.textContent = `🔄 换词（剩 ${dgState.swapsLeft}）`;
+      } else {
+        swapBtn.classList.add('disabled');
+        swapBtn.textContent = '🔄 换词已用完';
+      }
+    }
     if (tools) tools.classList.remove('dim');
     if (guessInput) { guessInput.disabled = true; guessInput.placeholder = '你是画师，不能猜自己的词 🤫'; }
     if (guessSend) guessSend.disabled = true;
-    if (hint) hint.textContent = '你正在画，安静作画，等其他人猜～';
+    if (hint) hint.textContent = dgState.solved
+      ? `本轮答案：「${dgState.word}」已被猜出，点「下一轮」继续 🎨`
+      : '你正在画，安静作画，等其他人猜～（看不清可换词，最多 2 次）';
   } else {
-    if (wordEl) { wordEl.textContent = '？ ？ ？'; wordEl.classList.add('hide'); }
+    // 非画师：未揭晓用掩码框显示字数（绝不泄露真实词）；已揭晓则显示答案
+    if (dgState.solved) {
+      if (wordEl) { wordEl.textContent = dgState.word || '—'; wordEl.classList.remove('hide'); }
+    } else {
+      if (wordEl) { wordEl.textContent = dgState.wordLen ? Array(dgState.wordLen).fill('＿').join(' ') : '？ ？ ？'; wordEl.classList.add('hide'); }
+    }
+    if (wordLenEl) wordLenEl.textContent = lenTxt;
     if (startBtn) startBtn.classList.add('hidden');
-    if (nextBtn) nextBtn.classList.remove('hidden');
+    if (nextBtn) {
+      nextBtn.classList.remove('hidden');
+      nextBtn.classList.add('disabled');           // 只有画师能点「下一轮」
+      nextBtn.textContent = '下一轮（等画师）';
+    }
+    if (swapBtn) swapBtn.classList.add('hidden');
     if (tools) tools.classList.add('dim');
-    if (guessInput) { guessInput.disabled = false; guessInput.placeholder = '看画猜词，输入后点猜…'; }
+    if (guessInput) {
+      guessInput.disabled = false;
+      guessInput.placeholder = dgState.solved
+        ? `答案已揭晓：${dgState.word}（继续猜不计分）`
+        : `看画猜词（${dgState.wordLen || '?'}个字），输入后点猜…`;
+    }
     if (guessSend) guessSend.disabled = false;
-    if (hint) hint.textContent = '画师正在作画，猜对了积分 +10 🔍';
+    if (hint) hint.textContent = dgState.solved
+      ? `本轮答案：「${dgState.word}」，等画师点「下一轮」继续 🎨`
+      : `画师正在作画，猜对了积分 +10 🔍（共 ${dgState.wordLen || '?'} 个字）`;
   }
   dgRenderScore();
 }
@@ -946,13 +1005,20 @@ function dgRenderScore() {
     return `<span class="it ${u.id === myId ? 'me' : ''}"><span>${av}</span><span>${escapeHTML(u.nickname || '匿名咸鱼')}</span><b>${u.drawScore}</b></span>`;
   }).join('');
 }
-function drawCorrectFx(msg) {
-  if (msg.id === myId) {
-    toast('✅ 你猜对了！积分 +10 🎉');
+function onDrawSolved(msg) {
+  dgState.solved = true;
+  dgState.solvedBy = msg.solvedBy;
+  if (msg.word) dgState.word = msg.word; // 揭晓答案给所有人
+  const me = msg.solvedBy === myId;
+  dgPushGuess(msg.solvedBy, msg.solvedName, msg.word, true); // 在猜词记录里标记"猜对答案的人和答案"
+  if (me) {
+    toast('✅ 你猜对了！+10 分 🎉');
     dgPop('✅', '猜对了 +10');
   } else {
-    toast(`🎨 ${msg.name} 猜对了「${msg.word}」+10`);
+    const drawerGets = (dgState.drawerId && dgState.drawerId !== msg.solvedBy);
+    toast(`🎨 ${msg.solvedName} 猜对了「${msg.word}」+10${drawerGets ? '，画师 +5' : ''}`);
   }
+  dgRender();
 }
 function dgPop(big, tx) {
   let p = $('dgPopEl');
@@ -967,19 +1033,68 @@ function dgPop(big, tx) {
   setTimeout(() => p.classList.remove('show'), 1100);
 }
 
+// 猜词记录（聊天框）：实时把每个人猜的词写进底部列表，全员可见
+function dgPushGuess(id, name, text, ok) {
+  dgState.guessLog = (dgState.guessLog || []).concat([{ id, name, text, ok }]).slice(-30);
+  dgRenderGuessLog();
+}
+function dgRenderGuessLog() {
+  const box = $('dgGuessLog'); if (!box) return;
+  const log = dgState.guessLog || [];
+  if (!log.length) {
+    box.innerHTML = '<div class="dg-gl-empty">还没有人猜，快来当第一个猜词王～</div>';
+    return;
+  }
+  box.innerHTML = log.map((g) => {
+    const me = g.id === myId;
+    let mark = '❌ 猜错';
+    if (g.ok) mark = '✅ 猜对';
+    else if (g.dup) mark = '🔁 已揭晓';
+    return `<div class="dg-gl-row ${g.ok ? 'ok' : ''} ${g.dup ? 'dup' : ''} ${me ? 'me' : ''}">
+      <span class="dg-gl-ava">${avatarHTML(g.name)}</span>
+      <span class="dg-gl-name">${escapeHTML(g.name)}</span>
+      <span class="dg-gl-mark">${mark}</span>
+      <span class="dg-gl-text">${escapeHTML(g.text)}</span>
+    </div>`;
+  }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+function onDrawSwap(msg) {
+  if (msg.drawerId === myId) toast(`🔄 你换了一个新词（还能换 ${msg.left} 次）`);
+  else toast(`🎨 ${msg.name} 换了一个新词，快看画！`);
+  dgRenderGuessLog();
+}
+
 // 打开 / 关闭游戏层
 function openDrawGame() {
+  // 需求①：只有联网房间、且已加入网页摸鱼场的用户才能玩你画我猜
+  if (mode !== 'online' || !wsConnected) {
+    toast('🎨 你画我猜需要联网房间，当前未连接后端～');
+    return;
+  }
   if (!myNick) { toast('先加入摸鱼场才能玩你画我猜哦'); showModal(); return; }
   $('drawGame').classList.remove('hidden');
   // 画布需在可见后才能取到尺寸
-  setTimeout(() => { dgSetupCanvas(); drawClearCanvas(); (dgState.ops || []).forEach(dgDrawSeg); dgRender(); }, 30);
+  setTimeout(() => { dgSetupCanvas(); drawClearCanvas(); (dgState.ops || []).forEach(dgDrawSeg); dgRender(); dgRenderGuessLog(); }, 30);
 }
 function closeDrawGame() { $('drawGame').classList.add('hidden'); }
 
 $('openDraw').onclick = openDrawGame;
 $('drawClose').onclick = closeDrawGame;
-$('dgStartBtn').onclick = () => { send({ type: 'drawStart', id: myId }); };
-$('dgNextBtn').onclick = () => { send({ type: 'drawNext', id: myId }); };
+$('dgStartBtn').onclick = () => {
+  // 无有效画师时任何人可开局；已有画师则只有画师本人能"再来一局"
+  if (dgActive() && !dgAmDrawer()) { toast('已有画师在位，等 TA 点「下一轮」哦 🤫'); return; }
+  send({ type: 'drawStart', id: myId });
+};
+$('dgNextBtn').onclick = () => {
+  if (!dgAmDrawer()) { toast('只有画师能点「下一轮」🤫'); return; }
+  send({ type: 'drawNext', id: myId });
+};
+$('dgSwap').onclick = () => {
+  if (!dgAmDrawer()) { toast('只有画师能换词 🤫'); return; }
+  if ((dgState.swapsLeft || 0) <= 0) { toast('换词次数已用完啦'); return; }
+  send({ type: 'drawSwap', id: myId });
+};
 
 // 猜词
 function dgSendGuess() {
