@@ -213,8 +213,7 @@ const connectTimer = setTimeout(() => { if (!wsConnected) enterLocalMode(); }, 3
 function enterLocalMode() {
   if (mode === 'local') return;
   mode = 'local';
-  serverState = { users: Object.values(localState.users) };
-  toast('📱 本地模式：本机多人（同浏览器切换昵称出榜）');
+  // 注意：先建 u 再覆盖 serverState，避免 render 时拿到旧（空）serverState
   if (myNick) {
     handleLocal({ type: 'join', id: myId, nickname: myNick, avatar: myAvatar });
     handleLocal({ type: 'start', id: myId }); // 本地模式也自动开始计时
@@ -222,6 +221,7 @@ function enterLocalMode() {
     hideModal();
   }
   else showModal();
+  toast('📱 本地模式：本机多人（同浏览器切换昵称出榜）');
   render();
   renderChat();
 }
