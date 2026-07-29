@@ -889,7 +889,8 @@ function dgDrawSeg(seg) {
   const cv = dgCanvas(); if (!cv || !cv._ctx) return;
   const ctx = cv._ctx;
   ctx.strokeStyle = seg.c || '#1C1C1E';
-  ctx.lineWidth = seg.w || 6;
+  // 线宽按画布宽度等比缩放（以 400px 宽为基准），保证不同设备上粗细比例一致
+  ctx.lineWidth = (seg.w || 6) * (cv._w / 400);
   ctx.beginPath();
   ctx.moveTo(seg.x1 * cv._w, seg.y1 * cv._h);
   ctx.lineTo(seg.x2 * cv._w, seg.y2 * cv._h);
