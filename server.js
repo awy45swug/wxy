@@ -539,6 +539,11 @@ const MIME = {
 const server = http.createServer((req, res) => {
   let urlPath = req.url.split('?')[0];
   if (urlPath === '/') urlPath = '/index.html';
+  if (urlPath === '/health' || urlPath === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, ts: now(), users: Object.keys(state.users || {}).length }));
+    return;
+  }
   const filePath = path.join(PUBLIC, path.normalize(urlPath));
   if (!filePath.startsWith(PUBLIC)) {
     res.writeHead(403);
