@@ -149,28 +149,41 @@ let xhsUpdated = 0;
 
 /* ---------- WebSocket ---------- */
 const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(`${wsProto}//${location.host}`);
+let ws;                 // 当前 WebSocket（断线后可重建，支持平滑重连）
+let reconnectDelay = 1000;  // 重连退避时间，连上后重置
+function scheduleReconnect() {
+  setTimeout(connect, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, 15000);
+}
+function connect() {
+  ws = new WebSocket(`${wsProto}//${location.host}`);
 let clockOffset = 0; // serverNow - clientNow，用于校正时钟漂移
 let prevRank = {};
 let lastTotal = {}; // 记录上次展示的时长，用于触发数字 pop 动画
 
-ws.onopen = () => {
-  wsConnected = true;
-  clearTimeout(connectTimer);
-  if (myNick) { sendJoin(); hideModal(); }
-  else showModal();
-};
+  ws.onopen = () => {
+    wsConnected = true;
+    reconnectDelay = 1000;     // 连上即重置退避
+    clearTimeout(connectTimer);
+    if (myNick) { sendJoin(); hideModal(); }
+    else showModal();
+    // 断线重连后恢复"你画我猜"在场状态（服务端 close 时已清 drawPresent）
+    if (!$('drawGame').classList.contains('hidden')) send({ type: 'drawEnter', id: myId });
+  };
 ws.onmessage = (e) => {
-  const msg = JSON.parse(e.data);
+  let msg;
+  try { msg = JSON.parse(e.data); } catch (err) { return; }
+  if (!msg || typeof msg !== 'object') return;
+  try {
   if (msg.type === 'state') {
     clockOffset = msg.serverNow - Date.now();
     serverState = msg;
-    if (msg.chats) chatHistory = msg.chats.slice(-50);
+    if (msg.chats) chatHistory = msg.chats.slice(-200);
     render();
     renderChat();
   } else if (msg.type === 'chat') {
     chatHistory.push(msg.msg);
-    if (chatHistory.length > 50) chatHistory = chatHistory.slice(-50);
+    if (chatHistory.length > 200) chatHistory = chatHistory.slice(-200);
     renderChat();
   } else if (msg.type === 'catch') {
     catchFx(msg.target);
@@ -202,12 +215,16 @@ ws.onmessage = (e) => {
   } else if (msg.type === 'spyState') {
     applySpyState(msg);
   }
+  } catch (err) { console.error('[onmessage]', err && err.message || err); }
 };
 ws.onerror = () => { if (!wsConnected) enterLocalMode(); };
-ws.onclose = () => {
-  if (!wsConnected) enterLocalMode();
-  else setTimeout(() => location.reload(), 2000); // 在线模式中途断线，尝试重连
-};
+  ws.onclose = () => {
+    if (!wsConnected) { enterLocalMode(); return; }
+    wsConnected = false;            // 在线中途断线：不整页刷新，指数退避重连
+    scheduleReconnect();
+  };
+}
+connect();
 
 // 若 3 秒内连不上后端（例如纯静态托管/无后端环境），自动降级为本地模式
 const connectTimer = setTimeout(() => { if (!wsConnected) enterLocalMode(); }, 3000);
@@ -955,7 +972,15 @@ function dgRender() {
   const round = $('dgRound'); if (round) round.textContent = dgState.round || 1;
   const cat = $('dgCat'); if (cat) cat.textContent = dgState.cat || '职场';
   const drawerUser = serverState.users.find(u => u.id === dgState.drawerId);
-  const dn = $('dgDrawer'); if (dn) dn.textContent = drawerUser ? (drawerUser.nickname || '匿名咸鱼') : (dgAmDrawer() ? '你' : '—');
+  const roleEl = $('dgRole');
+  if (roleEl) {
+    if (!dgActive()) roleEl.textContent = '⏳ 等待开始';
+    else if (dgAmDrawer()) roleEl.textContent = '🎨 你是画师';
+    else roleEl.textContent = '🖌️ 画师：' + (drawerUser ? (drawerUser.nickname || '匿名咸鱼') : '—');
+    roleEl.classList.toggle('me', dgAmDrawer());
+  }
+  const wm = document.querySelector('.dg-wordmask');
+  if (wm) wm.classList.toggle('drawer', dgAmDrawer());
   const wordEl = $('dgWord');
   const wordLenEl = $('dgWordLen');
   const startBtn = $('dgStartBtn'), nextBtn = $('dgNextBtn'), swapBtn = $('dgSwap');
@@ -1197,19 +1222,23 @@ function openDrawGame() {
   }
   if (!myNick) { toast('先加入摸鱼场才能玩你画我猜哦'); showModal(); return; }
   $('drawGame').classList.remove('hidden');
+  pushLayerState();
   // 进入「你画我猜」页面：登记在场，之后才能认领画师 / 保持画师身份
   if (ws && ws.readyState === 1) send({ type: 'drawEnter', id: myId });
   // 画布需在可见后才能取到尺寸
   setTimeout(() => { dgSetupCanvas(); drawClearCanvas(); (dgState.ops || []).forEach(dgDrawSeg); dgRender(); dgRenderGuessLog(); }, 30);
 }
-function closeDrawGame() {
+function closeDrawGame(fromPop) {
+  // 按钮关闭时若有历史层，先回退历史，由 popstate 真正执行关闭（保持返回键行为一致）
+  if (!fromPop && layerPushed) { history.back(); return; }
   $('drawGame').classList.add('hidden');
+  if (dgTimerInterval) { clearInterval(dgTimerInterval); dgTimerInterval = null; } // 停掉画猜倒计时空转
   // 离开「你画我猜」页面：退出在场（若自己是画师则释放座位，由服务端处理）
   if (ws && ws.readyState === 1) send({ type: 'drawLeave', id: myId });
 }
 
 $('openDraw').onclick = openDrawGame;
-$('drawClose').onclick = closeDrawGame;
+$('drawClose').onclick = () => closeDrawGame();
 $('dgJoinBtn').onclick = () => {
   if (dgJoined) {
     send({ type: 'drawQuit', id: myId });
@@ -1232,18 +1261,49 @@ $('dgStartBtn').onclick = () => {
     toast(`画师是 ${drawerName}，等 TA 画完这轮，或揭晓后你再接棒 🤫`);
     return;
   }
-  send({ type: 'drawStart', id: myId });
+  send({ type: 'drawStart', id: myId, bank: dgBank });
 };
 $('dgNextBtn').onclick = () => {
   // 画师本人，或特权昵称（羡温言/LL/水果刀/慢慢）可点「下一轮」
   const canAdvance = dgAmDrawer() || DRAW_NEXT_ALLOW.includes(myNick);
   if (!canAdvance) { toast('只有画师或指定管理员能点「下一轮」🤫'); return; }
-  send({ type: 'drawNext', id: myId });
+  send({ type: 'drawNext', id: myId, bank: dgBank });
 };
 $('dgSwap').onclick = () => {
   if (!dgAmDrawer()) { toast('只有画师能换词 🤫'); return; }
   if ((dgState.swapsLeft || 0) <= 0) { toast('换词次数已用完啦'); return; }
-  send({ type: 'drawSwap', id: myId });
+  send({ type: 'drawSwap', id: myId, bank: dgBank });
+};
+
+// 词库分类选择（你画我猜）
+let dgBank = '';
+document.querySelectorAll('.dg-bank').forEach(b => {
+  b.onclick = () => {
+    dgBank = b.dataset.bank || '';
+    document.querySelectorAll('.dg-bank').forEach(x => x.classList.toggle('active', x === b));
+    const label = { '': '随机', career: '职场', meme: '热梗', life: '生活' }[dgBank] || '随机';
+    toast(`📚 词库已切换：${label}（下一轮出词生效）`);
+  };
+});
+
+// 画作导出 PNG
+const dgExportBtn = document.getElementById('dgExport');
+if (dgExportBtn) dgExportBtn.onclick = () => {
+  const cv = dgCanvas();
+  if (!cv) return;
+  // 白底导出，避免透明背景
+  const out = document.createElement('canvas');
+  out.width = cv.width; out.height = cv.height;
+  const octx = out.getContext('2d');
+  octx.fillStyle = '#FFFFFF';
+  octx.fillRect(0, 0, out.width, out.height);
+  octx.drawImage(cv, 0, 0);
+  const a = document.createElement('a');
+  const word = (dgState && dgState.solved && dgState.word) ? dgState.word : '摸鱼画作';
+  a.download = `你画我猜_${word}_第${dgState.round || 1}轮.png`;
+  a.href = out.toDataURL('image/png');
+  a.click();
+  toast('🖼️ 画作已保存～');
 };
 
 // ===================== 谁是卧底 =====================
@@ -1257,11 +1317,23 @@ function openSpy() {
   if (mode !== 'online' || !wsConnected) { toast('🕵️ 谁是卧底需要联网房间，当前未连接后端～'); return; }
   if (!myNick) { toast('先加入摸鱼场才能玩谁是卧底哦'); showModal(); return; }
   $('spyGame').classList.remove('hidden');
+  pushLayerState();
   // 围观者进入面板即可看到大厅；只有点「参与游戏」才正式加入本局
   setTimeout(() => spyRender(), 30);
 }
-function closeSpy() { $('spyGame').classList.add('hidden'); }
+function closeSpy(fromPop) {
+  if (!fromPop && layerPushed) { history.back(); return; }
+  $('spyGame').classList.add('hidden');
+  if (spyTickTimer) { clearInterval(spyTickTimer); spyTickTimer = null; } // 关闭面板即停掉发言倒计时空转
+}
 
+let spyTickTimer = null;
+function updateSpyTick() {
+  const el = document.getElementById('spTick');
+  if (!el || spyState.phase !== 'speak') { if (spyTickTimer) { clearInterval(spyTickTimer); spyTickTimer = null; } return; }
+  const left = Math.max(0, Math.round((spyState.speakDeadline - adjustedNow()) / 1000));
+  el.textContent = left + 's';
+}
 function applySpyState(msg) {
   spyState = msg;
   // 结算瞬间结算本地积分（仅参与者、每人只加一次）
@@ -1286,10 +1358,24 @@ function spyCurSpeakerId() {
 
 function spyRender() {
   const s = spyState;
+  if (s.phase !== 'speak' && spyTickTimer) { clearInterval(spyTickTimer); spyTickTimer = null; }
   const inLobby = s.phase === 'lobby';
   const inOver = s.phase === 'over';
   const playing = s.phase === 'speak' || s.phase === 'vote';
   const host = DRAW_NEXT_ALLOW.includes(myNick);
+
+  // 阶段进度条：大厅隐藏；描述/投票/结算 三步走
+  const stepsEl = $('spySteps');
+  if (stepsEl) {
+    stepsEl.classList.toggle('hidden', inLobby);
+    const order = ['speak', 'vote', 'over'];
+    const curIdx = inOver ? 2 : (s.phase === 'vote' ? 1 : 0);
+    stepsEl.querySelectorAll('.sp-step').forEach(st => {
+      const i = order.indexOf(st.dataset.step);
+      st.classList.toggle('done', i < curIdx);
+      st.classList.toggle('active', i === curIdx && s.phase !== 'lobby');
+    });
+  }
 
   // 我的积分
   $('spyMyScore').textContent = '积分 ' + getSpyScore();
@@ -1327,10 +1413,12 @@ function spyRender() {
       const tag = p.id === s.hostId ? '<span class="sp-tag host">房主</span>' : '';
       const meTag = p.isMe ? '<span class="sp-tag me">你</span>' : '';
       const st = !p.alive ? '<span class="sp-tag out">出局</span>'
-        : (p.id === curId ? '<span class="sp-tag sp">发言中</span>'
-          : (s.phase === 'vote' && p.voted ? '<span class="sp-tag voted">已投</span>' : ''));
+        : (p.disconnected ? '<span class="sp-tag dc">重连中</span>'
+          : (p.id === curId ? '<span class="sp-tag sp">发言中</span>'
+            : (s.phase === 'vote' && p.voted ? '<span class="sp-tag voted">已投</span>' : '')));
       const voteCount = (s.tally && s.tally[p.id]) ? `<span class="sp-vote">${s.tally[p.id]}票</span>` : '';
-      return `<div class="${cls.join(' ')}"><span class="sp-name">${spyEsc(p.name)}</span>${meTag}${tag}${st}${voteCount}</div>`;
+      const ava = spyEsc((p.name || '?').charAt(0));
+      return `<div class="${cls.join(' ')}"><span class="sp-ava">${ava}</span><span class="sp-name">${spyEsc(p.name)}</span>${meTag}${tag}${st}${voteCount}</div>`;
     }).join('');
   }
   $('spyPlayerCount').textContent = (s.players || []).length;
@@ -1350,10 +1438,12 @@ function spyRender() {
 
   if (s.phase === 'speak') {
     const cur = s.players.find(p => p.id === curId);
-    $('spyCur').innerHTML = cur ? `轮到 <b>${spyEsc(cur.name)}</b> 发言…` : '等待发言';
+    const left = Math.max(0, Math.round((s.speakDeadline - adjustedNow()) / 1000));
+    $('spyCur').innerHTML = cur ? `轮到 <b>${spyEsc(cur.name)}</b> 发言… <span class="sp-tick" id="spTick">${left}s</span>` : '等待发言';
     const imCur = curId === myId;
     $('spySpeakInputWrap').classList.toggle('hidden', !imCur);
     if (imCur) setTimeout(() => { const i = $('spySpeakInput'); if (i && document.activeElement !== i) i.focus(); }, 50);
+    if (!spyTickTimer) spyTickTimer = setInterval(updateSpyTick, 250);
   } else if (s.phase === 'vote') {
     $('spyCur').textContent = '';
     $('spySpeakInputWrap').classList.add('hidden');
@@ -1377,8 +1467,12 @@ function spyRender() {
       const dis = iVoted ? 'disabled' : '';
       return `<button class="sp-vote-btn" data-target="${p.id}" ${dis}>${spyEsc(p.name)} <span class="sp-vc">${cnt}</span></button>`;
     }).join('') || '<div class="spy-empty">没有可投的人</div>';
+    // 弃票按钮（仅存活且未投票时可用）
+    if (me && me.alive) {
+      $('spyVoteList').innerHTML += `<button class="sp-vote-btn sp-abstain" data-target="" ${iVoted ? 'disabled' : ''}>🙅 弃票</button>`;
+    }
     document.querySelectorAll('.sp-vote-btn').forEach(b => {
-      b.onclick = () => { send({ type: 'spyVote', id: myId, target: b.dataset.target }); };
+      b.onclick = () => { send({ type: 'spyVote', id: myId, target: b.dataset.target || '' }); };
     });
   }
 
@@ -1439,7 +1533,7 @@ function spyRender() {
 
 // 事件绑定
 $('openSpy').onclick = openSpy;
-$('spyClose').onclick = closeSpy;
+$('spyClose').onclick = () => closeSpy();
 $('spyJoinBtn').onclick = () => {
   if (spyIsPlayer()) return;
   send({ type: 'spyJoin', id: myId });
@@ -1508,3 +1602,151 @@ window.addEventListener('resize', () => {
   if ($('drawGame').classList.contains('hidden')) return;
   dgSetupCanvas(); drawClearCanvas(); (dgState.ops || []).forEach(dgDrawSeg);
 });
+
+// ===================== D块：页面粘性 =====================
+
+// ---------- D2 PWA：注册 Service Worker ----------
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// ---------- D5 手机返回键关闭游戏层 ----------
+let layerPushed = false;
+function pushLayerState() {
+  if (layerPushed) return; // 已有游戏层历史，不重复压栈
+  history.pushState({ moyuLayer: 1 }, '');
+  layerPushed = true;
+}
+window.addEventListener('popstate', () => {
+  layerPushed = false;
+  if (!$('drawGame').classList.contains('hidden')) closeDrawGame(true);
+  if (!$('spyGame').classList.contains('hidden')) closeSpy(true);
+});
+
+// ---------- D1 新手引导（首次访问） ----------
+(function initTour() {
+  const mask = $('tourMask');
+  if (!mask) return;
+  if (localStorage.getItem('moyu_tour_v1')) return;
+  mask.classList.remove('hidden');
+  $('tourGo').onclick = () => {
+    localStorage.setItem('moyu_tour_v1', '1');
+    mask.classList.add('hidden');
+  };
+})();
+
+// ---------- D4 连续打卡 streak + 徽章 ----------
+function dateStr(offsetDays) {
+  const d = new Date(Date.now() + (offsetDays || 0) * 86400000);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function todayStr() { return dateStr(0); }
+function streakKey() { return 'moyu_streak_' + (myNick || ''); }
+function getStreak() {
+  try { return JSON.parse(localStorage.getItem(streakKey())) || { last: '', n: 0 }; }
+  catch (e) { return { last: '', n: 0 }; }
+}
+function streakBadge(n) {
+  if (n >= 30) return '🏅 摸鱼老油条';
+  if (n >= 14) return '🥈 摸鱼达人';
+  if (n >= 7) return '🥉 摸鱼常客';
+  if (n >= 3) return '✨ 渐入佳境';
+  return '';
+}
+function recordStreak() {
+  if (!myNick) return;
+  const t = todayStr();
+  const st = getStreak();
+  if (st.last === t) return; // 今天已打卡
+  st.n = (st.last === dateStr(-1)) ? st.n + 1 : 1;
+  st.last = t;
+  localStorage.setItem(streakKey(), JSON.stringify(st));
+  updateStreakUI();
+  const b = streakBadge(st.n);
+  toast(`🔥 连续打卡 ${st.n} 天${b ? ' · ' + b : ''}！`);
+}
+function updateStreakUI() {
+  const el = $('myStreak');
+  if (!el) return;
+  const st = getStreak();
+  // 今天或昨天打过卡视为「连续中」，否则归零显示
+  const alive = (st.last === todayStr() || st.last === dateStr(-1)) ? st.n : 0;
+  const b = streakBadge(alive);
+  el.textContent = alive + '天' + (b ? ' ' + b.split(' ')[0] : '');
+}
+// 开始摸鱼 = 打卡
+(function hookStreak() {
+  const btn = $('btnStart');
+  const orig = btn.onclick;
+  btn.onclick = () => { if (orig) orig(); recordStreak(); };
+})();
+updateStreakUI();
+setInterval(updateStreakUI, 10000); // 昵称加入后 / 跨天自动刷新
+
+// ---------- D3 排行榜分享图（晒榜） ----------
+function shareRoundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+(function initShareBoard() {
+  const btn = $('shareBoard');
+  if (!btn) return;
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    const users = serverState.users.slice()
+      .sort((a, b) => viewLive(b, currentView) - viewLive(a, currentView))
+      .slice(0, 10);
+    if (!users.length) { toast('榜上还没人，先摸会儿鱼再来晒～'); return; }
+    const W = 640, rowH = 58, top = 150, H = top + users.length * rowH + 70;
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d');
+    // 背景渐变
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#EAF7F0'); g.addColorStop(1, '#FFF7EC');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // 标题
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#1C1C1E';
+    ctx.font = 'bold 30px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.fillText('🐟 摸鱼英雄榜', W / 2, 56);
+    const viewLbl = { total: '总榜', today: '今日榜', week: '本周榜', month: '本月榜' }[currentView] || '总榜';
+    ctx.font = '15px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#8E8E93';
+    ctx.fillText(`${viewLbl} · ${todayStr()} · 带薪摸鱼，理直气壮`, W / 2, 88);
+    // 榜单行
+    users.forEach((u, i) => {
+      const y = top + i * rowH;
+      ctx.fillStyle = i === 0 ? 'rgba(255,227,140,.55)' : 'rgba(255,255,255,.75)';
+      shareRoundRect(ctx, 24, y - 36, W - 48, 48, 12);
+      ctx.fill();
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 20px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = '#1C1C1E';
+      const medal = ['🥇', '🥈', '🥉'][i] || String(i + 1);
+      ctx.fillText(medal, 44, y - 3);
+      ctx.font = '17px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillText(String(u.nickname || '匿名').slice(0, 10), 100, y - 3);
+      ctx.textAlign = 'right';
+      ctx.font = 'bold 17px Menlo, Consolas, monospace';
+      ctx.fillStyle = '#2E8B5F';
+      ctx.fillText(fmt(viewLive(u, currentView)), W - 44, y - 3);
+    });
+    // 页脚
+    ctx.textAlign = 'center';
+    ctx.font = '13px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = '#B0B0B5';
+    ctx.fillText('—— 摸鱼计时排行榜 · 卷什么卷，摸鱼才是本事 ——', W / 2, H - 26);
+    // 下载
+    const a = document.createElement('a');
+    a.download = `摸鱼英雄榜_${viewLbl}_${todayStr()}.png`;
+    a.href = cv.toDataURL('image/png');
+    a.click();
+    toast('📸 榜单图已保存，快去群里嘚瑟～');
+  };
+})();
