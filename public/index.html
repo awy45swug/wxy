@@ -4,6 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>🐟 摸鱼计时排行榜</title>
+  <meta name="theme-color" content="#86D1A8" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon.svg" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -58,12 +62,16 @@
           <span class="stat-label">总摸鱼</span>
           <b id="myTotal" class="stat-val">00:00:00</b>
         </div>
+        <div class="stat">
+          <span class="stat-label">连续打卡</span>
+          <b id="myStreak" class="stat-val">0天</b>
+        </div>
       </div>
     </section>
 
     <!-- 排行榜卡片 -->
     <section class="card board-card">
-      <h2 class="board-title">🏆 摸鱼英雄榜</h2>
+      <h2 class="board-title">🏆 摸鱼英雄榜 <button id="shareBoard" class="board-share">📸 晒榜</button></h2>
       <div class="view-tabs">
         <button class="vtab active" data-view="total">总榜</button>
         <button class="vtab" data-view="today">今日</button>
@@ -150,6 +158,20 @@
     </div>
   </div>
 
+  <!-- 新手引导（首次访问） -->
+  <div id="tourMask" class="tour-mask hidden">
+    <div class="tour-card">
+      <div class="tour-title">🐟 欢迎来到摸鱼计时排行榜</div>
+      <div class="tour-steps">
+        <div class="tour-step"><span class="tour-ico">⏱️</span><div><b>摸鱼计时</b><p>点「开始摸鱼」记录带薪摸鱼时长，自动上榜，还能连续打卡攒徽章</p></div></div>
+        <div class="tour-step"><span class="tour-ico">🏆</span><div><b>英雄榜</b><p>总榜 / 今日 / 本周 / 本月随意切换，还能抓别人摸鱼、偷时长</p></div></div>
+        <div class="tour-step"><span class="tour-ico">🎨</span><div><b>你画我猜</b><p>右上角进入，画画猜词攒积分，词库可选职场 / 热梗 / 生活</p></div></div>
+        <div class="tour-step"><span class="tour-ico">🕵️</span><div><b>谁是卧底</b><p>3~8 人开局，描述词语揪出卧底，支持匿名模式和弃票</p></div></div>
+      </div>
+      <button id="tourGo" class="btn btn-start tour-go">开始摸鱼之旅 🚀</button>
+    </div>
+  </div>
+
   <!-- 轻提示 -->
   <div id="toast" class="toast hidden"></div>
 
@@ -157,8 +179,18 @@
   <div id="drawGame" class="draw-game hidden">
     <div class="dg-top">
       <button id="drawClose" class="dg-close">‹ 返回</button>
-      <div class="dg-round">第 <b id="dgRound">1</b> 轮 · 画师 <b id="dgDrawer">—</b></div>
+      <div class="dg-round">第 <b id="dgRound">1</b> 轮</div>
+      <div id="dgRole" class="dg-role">⏳ 等待开始</div>
       <div id="dgTimer" class="dg-timer hidden">3:00</div>
+    </div>
+    <div class="dg-bankbar">
+      <span class="dg-bank-lbl">词库</span>
+      <div class="dg-banks">
+        <button class="dg-bank active" data-bank="">随机</button>
+        <button class="dg-bank" data-bank="career">职场</button>
+        <button class="dg-bank" data-bank="meme">热梗</button>
+        <button class="dg-bank" data-bank="life">生活</button>
+      </div>
     </div>
 
     <div id="dgSpecBanner" class="dg-spec-banner hidden">👀 围观模式：点下方「参与游戏」后才能画画 / 猜词</div>
@@ -181,20 +213,23 @@
     <div class="dg-canvas-card">
       <canvas id="dgBoard"></canvas>
       <div class="dg-tools" id="dgTools">
-        <span class="dg-sw active" data-c="#1C1C1E" style="background:#1C1C1E"></span>
-        <span class="dg-sw" data-c="#86D1A8" style="background:#86D1A8"></span>
-        <span class="dg-sw" data-c="#FF9F68" style="background:#FF9F68"></span>
-        <span class="dg-sw" data-c="#5AA9F0" style="background:#5AA9F0"></span>
-        <span class="dg-sw" data-c="#E5689A" style="background:#E5689A"></span>
-        <span class="dg-sw" data-c="#C8A25B" style="background:#C8A25B"></span>
-        <span class="dg-sw" data-c="#FF3B30" style="background:#FF3B30"></span>
-        <span class="dg-sw" data-c="#AF52DE" style="background:#AF52DE"></span>
-        <span class="dg-sw" data-c="#34C759" style="background:#34C759"></span>
-        <span class="dg-sw" data-c="#FFD60A" style="background:#FFD60A"></span>
+        <div class="dg-palette">
+          <span class="dg-sw active" data-c="#1C1C1E" style="background:#1C1C1E"></span>
+          <span class="dg-sw" data-c="#86D1A8" style="background:#86D1A8"></span>
+          <span class="dg-sw" data-c="#FF9F68" style="background:#FF9F68"></span>
+          <span class="dg-sw" data-c="#5AA9F0" style="background:#5AA9F0"></span>
+          <span class="dg-sw" data-c="#E5689A" style="background:#E5689A"></span>
+          <span class="dg-sw" data-c="#C8A25B" style="background:#C8A25B"></span>
+          <span class="dg-sw" data-c="#FF3B30" style="background:#FF3B30"></span>
+          <span class="dg-sw" data-c="#AF52DE" style="background:#AF52DE"></span>
+          <span class="dg-sw" data-c="#34C759" style="background:#34C759"></span>
+          <span class="dg-sw" data-c="#FFD60A" style="background:#FFD60A"></span>
+        </div>
         <span class="dg-tool" id="dgEraser">橡皮</span>
         <span class="dg-tool" id="dgUndo">↩️ 撤销</span>
         <span class="dg-tool" id="dgClear">清空</span>
         <span class="dg-tool" id="dgSwap">🔄 换词</span>
+        <span class="dg-tool" id="dgExport">🖼️ 导出</span>
         <span class="dg-brush">细<input type="range" id="dgBrush" min="2" max="22" value="6"></span>
       </div>
     </div>
@@ -228,12 +263,20 @@
       <div id="spyMyScore" class="spy-myscore">积分 0</div>
     </div>
 
+    <!-- 阶段进度条（大厅隐藏，游戏中显示：描述 → 投票 → 结算） -->
+    <div class="spy-steps hidden" id="spySteps">
+      <div class="sp-step" data-step="speak"><span class="sp-step-n">1</span><span class="sp-step-t">描述</span></div>
+      <div class="sp-step" data-step="vote"><span class="sp-step-n">2</span><span class="sp-step-t">投票</span></div>
+      <div class="sp-step" data-step="over"><span class="sp-step-n">3</span><span class="sp-step-t">结算</span></div>
+    </div>
+
     <!-- 顶部：词库类型 + 匿名开关（仅大厅可改） -->
     <div class="spy-topctrl" id="spyTopCtrl">
       <div class="spy-banks">
         <span class="spy-bank-lbl">词库</span>
         <button class="spy-bank active" data-bank="career">职场</button>
         <button class="spy-bank" data-bank="meme">网络热梗</button>
+        <button class="spy-bank" data-bank="life">生活休闲</button>
       </div>
       <label class="spy-anon">
         <span class="spy-anon-lbl">匿名</span>
