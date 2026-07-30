@@ -384,12 +384,21 @@ function flushSave() {
 
 const now = () => Date.now();
 
-// 跨天自动清零今日数据
+// 跨天自动清零今日数据 + 清理累积缓存（避免 state 单例只增不减导致内存泄漏）
 function checkDay() {
   const t = todayStr();
   if (state.day !== t) {
     state.day = t;
     for (const id in state.users) state.users[id].todayBase = 0;
+    // 清理历史数据：只保留排行榜用户，其他一律截断
+    state.usedWords = [];
+    state.chats = [];
+    if (state.game) {
+      state.game.ops = [];
+      state.game.guessLog = [];
+      state.game.settled = true;
+      state.game.deadline = 0;
+    }
     saveState();
   }
 }
@@ -436,6 +445,8 @@ function toClientUser(u) {
 }
 
 function broadcast() {
+  // 空载早退：没人连接就不做任何事，节省 CPU 和 JSON 序列化开销
+  if (!wss.clients || wss.clients.size === 0) return;
   checkDay();
   checkWeek();
   checkMonth();
@@ -1141,9 +1152,10 @@ wss.on('connection', (ws) => {
   });
 });
 
-// 每秒广播一次，保证排行榜实时滚动、跨天/跨周/跨月清零能及时生效
-setInterval(() => { try { broadcast(); } catch (e) { console.error('[broadcast]', e && e.stack || e); } }, 1000);
-setInterval(() => { try { flushSave(); } catch (e) { console.error('[flushSave]', e && e.message || e); } }, 5000); // 定时兜底落盘，防止崩溃丢失超过 800ms 的数据
+// 每 3 秒广播一次（人眼无感，CPU 直接砍 2/3）
+setInterval(() => { try { broadcast(); } catch (e) { console.error('[broadcast]', e && e.stack || e); } }, 3000);
+// 每 30 秒落盘兜底（之前 5s 太勤，JSON.stringify 整个 state 是 CPU 黑洞）
+setInterval(() => { try { flushSave(); } catch (e) { console.error('[flushSave]', e && e.message || e); } }, 30000);
 // 心跳保活：每 30s 清理僵死连接（如被网关因空闲断开），避免连接堆积与内存泄漏
 const PING_MS = 30000;
 setInterval(() => {
