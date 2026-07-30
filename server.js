@@ -361,6 +361,7 @@ if (state.game && state.game.deadline && state.game.deadline < now()) {
 }
 
 let saveTimer = null;
+let dirty = false; // 脏标志：state 有变化才落盘，避免闲时 30s 兜底反复序列化整个 state
 // 原子写盘：先写临时文件再 rename 覆盖，避免进程在写入中途崩溃导致 data.json 损坏、全部存档丢失
 function writeStateFileAtomic(content) {
   fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
@@ -368,17 +369,19 @@ function writeStateFileAtomic(content) {
   fs.renameSync(DATA_TMP, DATA_FILE);
 }
 function saveState() {
+  dirty = true;
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    try { writeStateFileAtomic(JSON.stringify(state)); }
+    try { writeStateFileAtomic(JSON.stringify(state)); dirty = false; }
     catch (e) { console.error('存档写入失败:', e.message); }
   }, 800);
 }
-// 立即落盘（绕过 800ms 防抖），用于定时兜底与关键时点
+// 立即落盘（绕过 800ms 防抖），用于定时兜底与关键时点；不带脏标志则跳过，省 CPU/IO
 function flushSave() {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-  try { writeStateFileAtomic(JSON.stringify(state)); }
+  if (!dirty) return;
+  try { writeStateFileAtomic(JSON.stringify(state)); dirty = false; }
   catch (e) { console.error('存档写入失败:', e.message); }
 }
 
@@ -447,9 +450,6 @@ function toClientUser(u) {
 function broadcast() {
   // 空载早退：没人连接就不做任何事，节省 CPU 和 JSON 序列化开销
   if (!wss.clients || wss.clients.size === 0) return;
-  checkDay();
-  checkWeek();
-  checkMonth();
   const payload = JSON.stringify({
     type: 'state',
     serverNow: now(),
@@ -505,7 +505,12 @@ const server = http.createServer((req, res) => {
     // 否则改了前端代码后老用户的浏览器一直拿旧文件（尤其是 sw.js 有 24h 更新节流）。
     const noCache = (ext === '.js' || ext === '.css' || ext === '.html');
     const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
-    if (noCache) headers['Cache-Control'] = 'no-cache';
+    if (noCache) {
+      headers['Cache-Control'] = 'no-cache';
+    } else if (ext === '.png' || ext === '.svg' || ext === '.ico' || ext === '.jpg' || ext === '.json') {
+      // 图片/图标/清单长期不变，缓存 1 天，减少重复拉取
+      headers['Cache-Control'] = 'public, max-age=86400';
+    }
     res.writeHead(200, headers);
     res.end(data);
   });
@@ -1154,8 +1159,10 @@ wss.on('connection', (ws) => {
 
 // 每 3 秒广播一次（人眼无感，CPU 直接砍 2/3）
 setInterval(() => { try { broadcast(); } catch (e) { console.error('[broadcast]', e && e.stack || e); } }, 3000);
-// 每 30 秒落盘兜底（之前 5s 太勤，JSON.stringify 整个 state 是 CPU 黑洞）
+// 每 30 秒落盘兜底（有脏标志才真正写，闲时跳过，省 CPU/IO）
 setInterval(() => { try { flushSave(); } catch (e) { console.error('[flushSave]', e && e.message || e); } }, 30000);
+// 跨天/跨周/跨月检查独立定时器（每 60s 一次，不再耦合进每 3s 的广播）
+setInterval(() => { try { checkDay(); checkWeek(); checkMonth(); } catch (e) { console.error('[checkPeriod]', e && e.message || e); } }, 60000);
 // 心跳保活：每 30s 清理僵死连接（如被网关因空闲断开），避免连接堆积与内存泄漏
 const PING_MS = 30000;
 setInterval(() => {
